@@ -1,0 +1,174 @@
+"""
+Configuration loader for Công Văn Processor.
+Reads config.json, provides typed dataclasses, validates required fields.
+"""
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional
+
+
+@dataclass
+class AzureConfig:
+    client_id: str
+    tenant_id: str = "common"
+    authority: str = ""
+    scopes: List[str] = field(default_factory=lambda: [
+        "https://graph.microsoft.com/Mail.Read",
+        "https://graph.microsoft.com/Mail.ReadBasic",
+    ])
+
+    def __post_init__(self) -> None:
+        if not self.authority:
+            self.authority = f"https://login.microsoftonline.com/{self.tenant_id}"
+
+
+@dataclass
+class MailConfig:
+    target_folder_name: str = "Công văn"
+    page_size: int = 50
+
+
+@dataclass
+class OutputConfig:
+    root_folder: str = (
+        r"\\LIENDO\Havip - Tài liệu\NHAN HIEU\@Nhan hieu Vietnam\Nhan cong van tu IPVN"
+    )
+    excel_filename: str = "SO CONG VAN DEN-LIENDO.xlsx"
+    date_folder_format: str = "%y.%m.%d"
+    # If root_folder is unreachable (e.g. network down), use this folder instead.
+    # Empty string = auto-detect: ~/Desktop/ToolXuLyMailCongVan
+    fallback_output_folder: str = ""
+
+
+@dataclass
+class ProcessingConfig:
+    strict_single_attachment: bool = False
+    log_level: str = "INFO"
+
+
+@dataclass
+class PortalConfig:
+    """Browser automation settings for IP Vietnam document portal downloads."""
+    url_patterns: List[str] = field(default_factory=lambda: [
+        "ipvietnam.gov.vn",
+        "dichvucong.ipvietnam",
+    ])
+    download_button_selectors: List[str] = field(default_factory=lambda: [
+        "button:has-text('Tải tất cả')",
+        "a:has-text('Tải tất cả')",
+        "button:has-text('Tải xuống tất cả')",
+        "a:has-text('Tải xuống tất cả')",
+        "[class*='download-all']",
+    ])
+    page_load_timeout_ms: int = 30000
+    wait_after_click_ms: int = 8000
+    headless: bool = True
+    fallback_to_attachments: bool = True  # try email attachments if no portal URL found
+    parallel_downloads: int = 5           # number of portal downloads to run concurrently
+
+
+@dataclass
+class AppConfig:
+    azure: AzureConfig
+    mail: MailConfig
+    output: OutputConfig
+    processing: ProcessingConfig
+    portal: PortalConfig = field(default_factory=PortalConfig)
+
+
+def load_config(config_path: Optional[Path] = None) -> AppConfig:
+    """
+    Load and parse configuration from config.json.
+    Search order if config_path is None:
+      1. Same directory as this module's package root
+      2. Current working directory
+    """
+    if config_path is None:
+        # Package root = parent of src/
+        pkg_root = Path(__file__).parent.parent
+        candidates = [
+            pkg_root / "config.json",
+            Path(os.getcwd()) / "config.json",
+        ]
+        for c in candidates:
+            if c.exists():
+                config_path = c
+                break
+
+    if config_path is None or not config_path.exists():
+        raise FileNotFoundError(
+            "config.json not found. "
+            "Please place config.json next to run_app.py or the .exe. "
+            "See README.md for setup instructions."
+        )
+
+    with open(config_path, encoding="utf-8") as f:
+        raw = json.load(f)
+
+    azure_raw = raw.get("azure", {})
+    client_id = azure_raw.get("client_id", "")
+    if not client_id or client_id == "YOUR_AZURE_APP_CLIENT_ID_HERE":
+        raise ValueError(
+            "config.json: 'azure.client_id' is not set. "
+            "Register an Azure App and paste the Application (client) ID. "
+            "See README.md → Azure App Registration."
+        )
+
+    azure = AzureConfig(
+        client_id=client_id,
+        tenant_id=azure_raw.get("tenant_id", "common"),
+        authority=azure_raw.get("authority", ""),
+        scopes=azure_raw.get("scopes", [
+            "https://graph.microsoft.com/Mail.Read",
+        ]),
+    )
+
+    mail_raw = raw.get("mail", {})
+    mail = MailConfig(
+        target_folder_name=mail_raw.get("target_folder_name", "Công văn"),
+        page_size=int(mail_raw.get("page_size", 50)),
+    )
+
+    out_raw = raw.get("output", {})
+    output = OutputConfig(
+        root_folder=out_raw.get(
+            "root_folder",
+            r"\\LIENDO\Havip - Tài liệu\NHAN HIEU\@Nhan hieu Vietnam\Nhan cong van tu IPVN",
+        ),
+        excel_filename=out_raw.get("excel_filename", "SO CONG VAN DEN-LIENDO.xlsx"),
+        date_folder_format=out_raw.get("date_folder_format", "%y.%m.%d"),
+        fallback_output_folder=str(out_raw.get("fallback_output_folder", "")),
+    )
+
+    proc_raw = raw.get("processing", {})
+    processing = ProcessingConfig(
+        strict_single_attachment=bool(proc_raw.get("strict_single_attachment", False)),
+        log_level=str(proc_raw.get("log_level", "INFO")),
+    )
+
+    portal_raw = raw.get("portal", {})
+    portal = PortalConfig(
+        url_patterns=portal_raw.get("url_patterns", [
+            "ipvietnam.gov.vn",
+            "dichvucong.ipvietnam",
+        ]),
+        download_button_selectors=portal_raw.get("download_button_selectors", [
+            "button:has-text('Tải tất cả')",
+            "a:has-text('Tải tất cả')",
+            "button:has-text('Tải xuống tất cả')",
+            "a:has-text('Tải xuống tất cả')",
+            "[class*='download-all']",
+        ]),
+        page_load_timeout_ms=int(portal_raw.get("page_load_timeout_ms", 30000)),
+        wait_after_click_ms=int(portal_raw.get("wait_after_click_ms", 8000)),
+        headless=bool(portal_raw.get("headless", True)),
+        fallback_to_attachments=bool(portal_raw.get("fallback_to_attachments", True)),
+        parallel_downloads=int(portal_raw.get("parallel_downloads", 5)),
+    )
+
+    return AppConfig(azure=azure, mail=mail, output=output, processing=processing, portal=portal)
+

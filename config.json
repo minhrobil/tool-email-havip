@@ -1,0 +1,48 @@
+{
+  "_comment": "Cong Van Processor - Configuration file. Edit this file to match your environment.",
+  "azure": {
+    "_comment_client_id": "Register an Azure App: https://portal.azure.com -> App registrations -> New. Platform: Mobile/Desktop, Redirect URI: http://localhost",
+    "client_id": "eca42d04-276c-4437-9168-f0af2b63b2da",
+    "tenant_id": "common",
+    "authority": "https://login.microsoftonline.com/common",
+    "scopes": [
+      "https://graph.microsoft.com/Mail.Read",
+      "https://graph.microsoft.com/Mail.ReadBasic"
+    ]
+  },
+  "mail": {
+    "target_folder_name": "Công văn",
+    "page_size": 50
+  },
+  "output": {
+    "root_folder": "\\\\LIENDO\\Havip - Tài liệu\\NHAN HIEU\\@Nhan hieu Vietnam\\Nhan cong van tu IPVN",
+    "excel_filename": "SO CONG VAN DEN-LIENDO.xlsx",
+    "date_folder_format": "%y.%m.%d",
+    "_comment_fallback": "Khi network không khả dụng, lưu vào đây. Để trống = tự dùng Desktop\\ToolXuLyMailCongVan",
+    "fallback_output_folder": ""
+  },
+  "processing": {
+    "strict_single_attachment": false,
+    "log_level": "INFO"
+  },
+  "portal": {
+    "_comment": "Browser automation settings for IP Vietnam document portal downloads.",
+    "url_patterns": [
+      "ipvietnam.gov.vn",
+      "dichvucong.ipvietnam"
+    ],
+    "download_button_selectors": [
+      "button:has-text('Tải tất cả')",
+      "a:has-text('Tải tất cả')",
+      "button:has-text('Tải xuống tất cả')",
+      "a:has-text('Tải xuống tất cả')",
+      "[class*='download-all']"
+    ],
+    "page_load_timeout_ms": 30000,
+    "wait_after_click_ms": 8000,
+    "headless": true,
+    "fallback_to_attachments": true,
+    "parallel_downloads": 5
+  }
+}
+
