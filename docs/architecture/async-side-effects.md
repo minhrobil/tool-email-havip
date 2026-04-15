@@ -129,9 +129,9 @@ page.on("download", lambda d: downloads_received.append(d))
 - **When:** User clicks "Đóng Excel & Bắt đầu quét" in the Excel-locked dialog
 - **Risk:** Kills ALL Excel processes — user loses unsaved work in any open Excel file
 
-### `explorer <folder>`
-- **Location:** `src/gui/app.py:_open_exported_folder()`
-- **Command:** `subprocess.Popen(["explorer", os.fspath(folder)])`
+### Open Export Folder
+- **Location:** `src/gui/app.py:_open_folder_in_file_manager()`
+- **Command:** macOS `open <folder>`, Windows `explorer <folder>`, Linux `xdg-open <folder>`
 - **When:** User clicks "📂 Mở folder export"
 - **Note:** Non-blocking (`Popen`, not `run`)
 
@@ -140,4 +140,3 @@ page.on("download", lambda d: downloads_received.append(d))
 - **Command:** Calls Windows `schtasks /create` to register daily Task Scheduler job
 - **Trigger:** Daily at 08:00
 - **Action:** Runs `run_headless.bat`
-

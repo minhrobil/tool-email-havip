@@ -48,7 +48,7 @@ Disk: ~/.tool_mail_cong_van/<date>/_processed.json
       "internet_message_id": "<uuid@example.com>",
       "date_folder": "26.04.14",
       "so_don": "4-2025-20619",
-      "attachment_filenames": ["1thongbao.pdf"],
+      "attachment_filenames": ["1-thongbao.pdf"],
       "processed_at": "2026-04-14T09:15:32",
       "run_status": "OK"
     }
@@ -151,4 +151,3 @@ _thread() finishes → self.after(0, lambda: self._on_scan_done(result))
 | Config | ✅ Manual | config.json on disk | JSON |
 
 **Note:** User preferences (date range, export folder) are NOT persisted between sessions. They always reset to defaults (today's date, `~/Desktop/CongVanExport`) on app launch.
-

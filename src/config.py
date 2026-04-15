@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -34,13 +35,11 @@ class MailConfig:
 
 @dataclass
 class OutputConfig:
-    root_folder: str = (
-        r"\\LIENDO\Havip - Tài liệu\NHAN HIEU\@Nhan hieu Vietnam\Nhan cong van tu IPVN"
-    )
+    root_folder: str = str(Path.home() / "Desktop" / "CongVanExport")
     excel_filename: str = "SO CONG VAN DEN-LIENDO.xlsx"
     date_folder_format: str = "%y.%m.%d"
-    # If root_folder is unreachable (e.g. network down), use this folder instead.
-    # Empty string = auto-detect: ~/Desktop/ToolXuLyMailCongVan
+    # If root_folder is unreachable, use this folder instead.
+    # Empty string = auto-detect: ~/Desktop/CongVanExport
     fallback_output_folder: str = ""
 
 
@@ -84,16 +83,20 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
     """
     Load and parse configuration from config.json.
     Search order if config_path is None:
-      1. Same directory as this module's package root
-      2. Current working directory
+      1. Same directory as the frozen .exe, if running from PyInstaller
+      2. Same directory as this module's package root
+      3. Current working directory
     """
     if config_path is None:
         # Package root = parent of src/
         pkg_root = Path(__file__).parent.parent
-        candidates = [
+        candidates = []
+        if getattr(sys, "frozen", False):
+            candidates.append(Path(sys.executable).parent / "config.json")
+        candidates.extend([
             pkg_root / "config.json",
             Path(os.getcwd()) / "config.json",
-        ]
+        ])
         for c in candidates:
             if c.exists():
                 config_path = c
@@ -134,14 +137,20 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
     )
 
     out_raw = raw.get("output", {})
+    root_folder_raw = out_raw.get(
+        "root_folder",
+        str(Path.home() / "Desktop" / "CongVanExport"),
+    )
+    fallback_folder_raw = out_raw.get("fallback_output_folder", "")
     output = OutputConfig(
-        root_folder=out_raw.get(
-            "root_folder",
-            r"\\LIENDO\Havip - Tài liệu\NHAN HIEU\@Nhan hieu Vietnam\Nhan cong van tu IPVN",
-        ),
+        root_folder=str(Path(str(root_folder_raw)).expanduser()),
         excel_filename=out_raw.get("excel_filename", "SO CONG VAN DEN-LIENDO.xlsx"),
         date_folder_format=out_raw.get("date_folder_format", "%y.%m.%d"),
-        fallback_output_folder=str(out_raw.get("fallback_output_folder", "")),
+        fallback_output_folder=(
+            str(Path(str(fallback_folder_raw)).expanduser())
+            if fallback_folder_raw
+            else ""
+        ),
     )
 
     proc_raw = raw.get("processing", {})
@@ -171,4 +180,3 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
     )
 
     return AppConfig(azure=azure, mail=mail, output=output, processing=processing, portal=portal)
-

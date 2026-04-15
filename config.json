@@ -15,10 +15,10 @@
     "page_size": 50
   },
   "output": {
-    "root_folder": "\\\\LIENDO\\Havip - Tài liệu\\NHAN HIEU\\@Nhan hieu Vietnam\\Nhan cong van tu IPVN",
+    "root_folder": "~/Desktop/CongVanExport",
     "excel_filename": "SO CONG VAN DEN-LIENDO.xlsx",
     "date_folder_format": "%y.%m.%d",
-    "_comment_fallback": "Khi network không khả dụng, lưu vào đây. Để trống = tự dùng Desktop\\ToolXuLyMailCongVan",
+    "_comment_fallback": "Khi thư mục output không khả dụng, lưu vào đây. Để trống = tự dùng Desktop/CongVanExport",
     "fallback_output_folder": ""
   },
   "processing": {
@@ -45,4 +45,3 @@
     "parallel_downloads": 5
   }
 }
-

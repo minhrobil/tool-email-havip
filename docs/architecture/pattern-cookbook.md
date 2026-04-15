@@ -222,7 +222,7 @@ from pathlib import Path
 from src.dedup.manager import DedupManager
 from src.folder.routing import get_date_folder_name
 
-daily_folder = Path(r"\\LIENDO\...\26.04.14")
+daily_folder = Path("~/Desktop/CongVanExport/26.04.14").expanduser()
 folder_name = get_date_folder_name(msg.received_datetime, "%y.%m.%d")
 dedup = DedupManager(daily_folder)
 
@@ -245,7 +245,7 @@ is_dup, reason = dedup.is_duplicate(
     internet_message_id=msg.internet_message_id,
     date_folder=folder_name,
     so_don=parsed.so_don,
-    attachment_filenames=["1thongbao.pdf"],
+    attachment_filenames=["1-thongbao.pdf"],
 )
 
 # After successful Excel write:
@@ -254,7 +254,7 @@ dedup.register(
     internet_message_id=msg.internet_message_id,
     date_folder=folder_name,
     so_don=parsed.so_don,
-    attachment_filenames=["1thongbao.pdf"],
+    attachment_filenames=["1-thongbao.pdf"],
     run_status="OK",
 )
 ```
@@ -269,7 +269,7 @@ dedup.register(
 from src.excel.writer import ExcelWriter, ExcelLockedError
 from pathlib import Path
 
-daily_folder = Path(r"\\LIENDO\...\26.04.14")
+daily_folder = Path("~/Desktop/CongVanExport/26.04.14").expanduser()
 writer = ExcelWriter(daily_folder, "SO CONG VAN DEN-LIENDO.xlsx")
 seq = writer.next_sequence_number()   # reads existing file, returns next STT
 
@@ -278,7 +278,7 @@ row = {
     "Ngày nhận mail":       "2026-04-14",
     "Tên mail (Subject)":   "Thông báo kết quả thẩm định",
     "Người gửi":            "IPVN <ipvn@example.com>",
-    "Tên attachment":       "1thongbao.pdf",
+    "Tên attachment":       "1-thongbao.pdf",
     "Số công văn":          "53397/SHTT-NH.IP",
     "Loại công văn":        "KQTĐ nội dung",
     # ... all 17 DATA_COLUMNS fields
@@ -447,4 +447,3 @@ else:
 ```
 
 **⚠ Debug tip:** Set `headless=False` to see the browser and diagnose button selector failures.
-

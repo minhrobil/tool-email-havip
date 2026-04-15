@@ -1,24 +1,35 @@
 @echo off
 :: ─────────────────────────────────────────────────────────────────────────
-:: setup.bat  —  First-time environment setup for Cong Van Processor
-:: Uses Python at C:\Program Files\Python312\python.exe
-:: Run this ONCE before using the application.
+:: setup.bat  —  Legacy Windows source setup for Cong Van Processor
+::
+:: Source development is macOS-first now. Prefer:
+::   setup.sh
+::
+:: This file is kept only for emergency source runs on Windows.
 :: ─────────────────────────────────────────────────────────────────────────
 chcp 65001 > nul
 cd /d "%~dp0"
 
-set PYTHON="C:\Program Files\Python312\python.exe"
+set "PYTHON=py -3"
 
 echo ================================================================
-echo  Cong Van Processor - First-time Setup
+echo  Cong Van Processor - Legacy Windows Source Setup
 echo ================================================================
+echo.
+echo NOTE: Source development is macOS-first. Use setup.sh on macOS.
 echo.
 
 :: ── Step 1: Verify Python ─────────────────────────────────────────────────
 echo [1/5] Checking Python...
 %PYTHON% --version
 if %errorlevel% neq 0 (
-    echo ERROR: Python not found at C:\Program Files\Python312\python.exe
+    echo ERROR: Python Launcher not found. Install Python 3.10+ with py launcher.
+    pause & exit /b 1
+)
+%PYTHON% -c "import sys, tkinter; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+if %errorlevel% neq 0 (
+    echo ERROR: Python 3.10+ with tkinter is required.
+    echo Install Python from python.org and enable Tcl/Tk support.
     pause & exit /b 1
 )
 
@@ -32,12 +43,20 @@ if exist venv (
     if %errorlevel% neq 0 ( echo ERROR creating venv & pause & exit /b 1 )
     echo   venv created.
 )
+call venv\Scripts\python.exe -c "import sys, tkinter; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
+if %errorlevel% neq 0 (
+    echo ERROR: Existing venv is not Python 3.10+ with tkinter.
+    echo Delete the venv folder and run setup.bat again.
+    pause & exit /b 1
+)
 
 :: ── Step 3: Install dependencies ─────────────────────────────────────────
 echo.
 echo [3/5] Installing Python dependencies...
 call venv\Scripts\pip.exe install -r requirements.txt
 if %errorlevel% neq 0 ( echo ERROR installing dependencies & pause & exit /b 1 )
+call venv\Scripts\pip.exe install pytest
+if %errorlevel% neq 0 ( echo ERROR installing pytest & pause & exit /b 1 )
 
 :: ── Step 4: Install Playwright Chromium browser ───────────────────────────
 echo.
@@ -67,11 +86,10 @@ echo NEXT STEPS:
 echo   1. Edit config.json  -^>  set azure.client_id
 echo      (See README.md -^> Azure App Registration for instructions)
 echo.
-echo   2. Double-click run.bat to launch the application
+echo   2. Double-click run.bat to launch the application, or use ./run.sh on macOS
 echo.
 echo   3. Click "Dang nhap Microsoft" to sign in once
 echo.
 echo   4. Click "Quet mail" to start processing
 echo.
 pause
-

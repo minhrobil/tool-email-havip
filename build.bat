@@ -3,7 +3,7 @@
 :: build.bat  —  Build standalone Windows .exe with PyInstaller
 ::
 :: Output: dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe
-:: Users only need this .exe + config.json; no Python install required.
+:: Also copies dist-ready helper scripts for Windows scheduling.
 :: ─────────────────────────────────────────────────────────────────────────
 chcp 65001 > nul
 cd /d "%~dp0"
@@ -12,15 +12,48 @@ echo ================================================================
 echo  Building ToolXuLyMailCongVan.exe ...
 echo ================================================================
 
+set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
+
+if not exist "%PYTHON_EXE%" (
+    echo [ERROR] Khong tim thay venv\Scripts\python.exe.
+    echo Chay setup.bat truoc khi build tren Windows.
+    echo.
+    pause
+    exit /b 1
+)
+
+if not exist "packaging\windows\run_headless.dist.bat" (
+    echo [ERROR] Khong tim thay packaging\windows\run_headless.dist.bat.
+    pause
+    exit /b 1
+)
+
+if not exist "packaging\windows\setup_scheduler.dist.bat" (
+    echo [ERROR] Khong tim thay packaging\windows\setup_scheduler.dist.bat.
+    pause
+    exit /b 1
+)
+
 :: Install/update dependencies first
-pip install -r requirements.txt
+call "%PYTHON_EXE%" -m pip install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo.
+    echo ❌ Dependency install failed.
+    pause
+    exit /b 1
+)
 
 :: Install Playwright browser (Chromium) — required for portal automation
-playwright install chromium
-playwright install-deps chromium
+call "%PYTHON_EXE%" -m playwright install chromium
+if %errorlevel% neq 0 (
+    echo.
+    echo ❌ Playwright Chromium install failed.
+    pause
+    exit /b 1
+)
 
 :: Run PyInstaller
-pyinstaller ^
+call "%PYTHON_EXE%" -m PyInstaller ^
   --name ToolXuLyMailCongVan ^
   --onedir ^
   --windowed ^
@@ -40,10 +73,15 @@ pyinstaller ^
   run_app.py
 
 if %errorlevel% equ 0 (
+    copy /y "config.json" "dist\ToolXuLyMailCongVan\config.json" > nul
+    copy /y "packaging\windows\run_headless.dist.bat" "dist\ToolXuLyMailCongVan\run_headless.bat" > nul
+    copy /y "packaging\windows\setup_scheduler.dist.bat" "dist\ToolXuLyMailCongVan\setup_scheduler.bat" > nul
+
     echo.
     echo ✅ Build successful!
     echo.
     echo   Executable : dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe
+    echo   Scheduler  : dist\ToolXuLyMailCongVan\setup_scheduler.bat
     echo.
     echo IMPORTANT: Playwright Chromium must also be available on the target machine.
     echo   Option A: Run 'playwright install chromium' on the target machine.
@@ -55,6 +93,7 @@ if %errorlevel% equ 0 (
     echo   2. Edit config.json with the correct Azure client_id and folder paths
     echo   3. Install Playwright browser on target machine (see above)
     echo   4. Double-click ToolXuLyMailCongVan.exe to launch
+    echo   5. Run setup_scheduler.bat inside dist\ToolXuLyMailCongVan\ if you need Task Scheduler
 ) else (
     echo.
     echo ❌ Build failed. Check error messages above.

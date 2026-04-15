@@ -38,8 +38,8 @@ get_date_folder_name(received_datetime, "%y.%m.%d")
         │  e.g. "2026-04-14T01:30:00Z" → local "2026-04-14" → "26.04.14"
         ▼
 get_daily_folder(received_datetime, root_folder, format, fallback)
-        │  Tries \\LIENDO\...\26.04.14\ (mkdir)
-        │  On OSError → fallback to ~/Desktop/ToolXuLyMailCongVan/26.04.14/
+        │  Tries ~/Desktop/CongVanExport/26.04.14/ by default (mkdir)
+        │  On OSError → fallback_output_folder or ~/Desktop/CongVanExport/26.04.14/
         ▼
 Path (daily_folder), bool (used_fallback)
         │
@@ -96,7 +96,7 @@ ExcelWriter.next_sequence_number()
         │  Reads existing DATA sheet row count → returns next STT (1-based)
         │
 _rename_downloaded_files(paths, seq)
-        │  Renames each file to {seq}{original_name} (e.g. "3thongbao.pdf")
+        │  Renames each file to {seq}-{original_name} (e.g. "3-thongbao.pdf")
         │
         ▼
 ExcelWriter.append_data_row(row_dict)
@@ -186,10 +186,9 @@ _load_config_and_route()
 
 | File | Path | Created by |
 |---|---|---|
-| Daily folder | `\\LIENDO\...\26.04.14\` (or Desktop fallback) | `folder/routing.py:get_daily_folder()` |
+| Daily folder | `~/Desktop/CongVanExport/26.04.14/` by default, or selected output folder | `folder/routing.py:get_daily_folder()` |
 | Excel report | `<daily_folder>\SO CONG VAN DEN-LIENDO.xlsx` | `excel/writer.py:ExcelWriter` |
 | Downloaded PDF | `<daily_folder>\{seq}thongbao_12345.pdf` | `portal/browser_downloader.py` or `mail/downloader.py` |
 | Dedup registry | `~/.tool_mail_cong_van/<date>/_processed.json` | `dedup/manager.py` |
 | Scan log | `~/.tool_mail_cong_van/<date>/scan_<range>.log` | `processor/email_processor.py:_log_run_summary()` |
 | Token cache | `~/.tool_mail_cong_van/token_cache.bin` | `auth/graph_auth.py` |
-

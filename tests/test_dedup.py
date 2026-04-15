@@ -18,6 +18,15 @@ from src.dedup.manager import DedupManager
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def isolate_tool_folder(tmp_path, monkeypatch):
+    """Keep _processed.json inside pytest tmp_path instead of ~/.tool_mail_cong_van."""
+    monkeypatch.setattr(
+        "src.dedup.manager.get_tool_export_folder",
+        lambda _date_folder: tmp_path,
+    )
+
+
 def make_manager(tmp_path: Path) -> DedupManager:
     return DedupManager(tmp_path)
 
@@ -115,4 +124,3 @@ class TestDedupManagerFreshFolder:
         # Should not raise; should start with empty state
         mgr = make_manager(tmp_path)
         assert mgr.count() == 0
-

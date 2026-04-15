@@ -102,7 +102,10 @@ def _bare_urls(text: str) -> List[str]:
     """Find raw http(s) URLs in any text string."""
     if not text:
         return []
-    return [u.rstrip(".,;)'\"") for u in _RE_URL.findall(text)]
+    return [
+        _html_module.unescape(u.rstrip(".,;)'\"")).strip()
+        for u in _RE_URL.findall(text)
+    ]
 
 
 def _filter_and_dedup(candidates: List[str], patterns: List[str]) -> List[str]:
@@ -151,4 +154,3 @@ def extract_first_portal_url(
     """
     urls = extract_portal_urls(body_html, body_text, url_patterns)
     return urls[0] if urls else None
-

@@ -149,7 +149,7 @@ The single source of truth is `config.json` (at repo root). It is loaded by `src
 |---|---|---|
 | `AzureConfig` | `azure` | `client_id` (**required**), `tenant_id`, `scopes` |
 | `MailConfig` | `mail` | `target_folder_name` ("Công văn"), `page_size` (50) |
-| `OutputConfig` | `output` | `root_folder` (network path), `excel_filename`, `fallback_output_folder` |
+| `OutputConfig` | `output` | `root_folder` (default `~/Desktop/CongVanExport`), `excel_filename`, `fallback_output_folder` |
 | `ProcessingConfig` | `processing` | `strict_single_attachment`, `log_level` |
 | `PortalConfig` | `portal` | `url_patterns`, `download_button_selectors`, `headless`, `parallel_downloads` (int, default 5) |
 
@@ -246,7 +246,7 @@ python -m pytest tests/ -v
 | `src/folder/routing.py` | Folder date logic — UTC→local conversion is critical |
 | `src/excel/writer.py` | DATA_COLUMNS / META_COLUMNS order — breaking this corrupts existing Excel files |
 | `src/parser/rules.py` | CLASSIFICATION_RULES order matters — first match wins |
-| `config.json` | Production config — contains real Azure client_id and network paths |
+| `config.json` | Production config — contains real Azure client_id and default output settings |
 
 ---
 
@@ -255,7 +255,7 @@ python -m pytest tests/ -v
 1. **Vietnamese diacritics in regex** — use literal chars in character classes, not `\w`. See `src/parser/rules.py` pattern comments.
 2. **Playwright must be installed separately** — `pip install playwright && playwright install chromium`. The `.exe` also needs Chromium present.
 3. **Excel file locked** — if `SO CONG VAN DEN-LIENDO.xlsx` is open in Excel, writes fail with `ExcelLockedError`. GUI handles this with a dialog; headless mode raises.
-4. **Network path unreachable** — `get_daily_folder()` auto-falls back to `~/Desktop/ToolXuLyMailCongVan`. Files are saved there and a warning is logged.
+4. **Output folder unreachable** — `get_daily_folder()` auto-falls back to `~/Desktop/CongVanExport`. Files are saved there and a warning is logged.
 5. **Token cache location** — `~/.tool_mail_cong_van/token_cache.bin`. Delete this file to force re-login.
 6. **Headless mode requires pre-authentication** — must run GUI once first to cache the token.
 7. **CLASSIFICATION_RULES order** — "Từ chối hủy bỏ HLC" must come BEFORE "Cấp toàn bộ" because cancellation-rejection docs also contain the grant phrase.
@@ -274,4 +274,3 @@ python -m pytest tests/ -v
 - [ ] Any new I/O in `_process_one()` outside the lock; only Excel write + `DedupManager.register()` inside `_write_lock`
 - [ ] Tests pass: `python -m pytest tests/ -v`
 - [ ] Ticket doc created in `docs/tickets/`
-

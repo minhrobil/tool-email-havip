@@ -75,12 +75,14 @@ class TestGetDateFolderName:
 
 class TestGetDailyFolder:
     def test_creates_folder(self, tmp_path):
-        folder = get_daily_folder("2026-04-14T12:00:00Z", str(tmp_path), "%y.%m.%d")
+        folder, used_fallback = get_daily_folder("2026-04-14T12:00:00Z", str(tmp_path), "%y.%m.%d")
+        assert used_fallback is False
         assert folder.exists()
         assert folder.is_dir()
 
     def test_folder_name_matches(self, tmp_path):
-        folder = get_daily_folder("2025-01-05T12:00:00Z", str(tmp_path), "%y.%m.%d")
+        folder, used_fallback = get_daily_folder("2025-01-05T12:00:00Z", str(tmp_path), "%y.%m.%d")
+        assert used_fallback is False
         assert folder.parent == tmp_path
         assert folder.name.startswith("25.")
 
@@ -89,12 +91,16 @@ class TestGetDailyFolder:
         get_daily_folder("2026-04-14T12:00:00Z", str(tmp_path), "%y.%m.%d")
         get_daily_folder("2026-04-14T12:00:00Z", str(tmp_path), "%y.%m.%d")
 
-    def test_invalid_root_raises(self):
+    def test_invalid_root_raises(self, tmp_path):
+        bad_root = tmp_path / "root_file"
+        bad_root.write_text("not a directory", encoding="utf-8")
+        bad_fallback = tmp_path / "fallback_file"
+        bad_fallback.write_text("not a directory", encoding="utf-8")
+
         with pytest.raises(OSError):
-            # A path that cannot be created (e.g. null bytes or invalid drive)
             get_daily_folder(
                 "2026-04-14T12:00:00Z",
-                "Z:\\nonexistent_drive_xyz\\path",
+                str(bad_root),
                 "%y.%m.%d",
+                str(bad_fallback),
             )
-

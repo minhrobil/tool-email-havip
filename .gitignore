@@ -1,1 +1,25 @@
-/venv
+# Python environments
+/venv/
+/.venv/
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+/build/
+/dist/
+*.spec
+
+# Local logs/runtime output
+*.log
+/_scheduler_run.log
+/_scheduler_run.err.log
+/CongVanExport/
+
+# OS/editor noise
+.DS_Store

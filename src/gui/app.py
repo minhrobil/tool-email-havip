@@ -21,6 +21,7 @@ import logging
 import os
 import pathlib
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -93,6 +94,17 @@ def _read_range_stats(date_from: datetime, date_to: datetime, date_folder_format
                 pass
         cur += timedelta(days=1)
     return stats
+
+
+def _open_folder_in_file_manager(folder: pathlib.Path) -> None:
+    """Open a folder in the native file manager for the current OS."""
+    folder.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", os.fspath(folder)])
+    elif os.name == "nt":
+        subprocess.Popen(["explorer", os.fspath(folder)])
+    else:
+        subprocess.Popen(["xdg-open", os.fspath(folder)])
 
 
 class CongVanApp(tk.Tk):
@@ -923,8 +935,14 @@ class CongVanApp(tk.Tk):
 
     def _open_exported_folder(self) -> None:
         folder = pathlib.Path(self._last_export_folder)
-        folder.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(["explorer", os.fspath(folder)])
+        try:
+            _open_folder_in_file_manager(folder)
+        except Exception as exc:
+            logger.warning("Could not open export folder %s: %s", folder, exc)
+            messagebox.showerror(
+                "Không mở được folder",
+                f"Không mở được thư mục export:\n{folder}\n\n{exc}",
+            )
 
     def _ask_excel_locked(self, excel_path) -> bool:
         """
@@ -1275,4 +1293,3 @@ def _find_locked_excel_files(root: pathlib.Path, excel_filename: str) -> list:
 def run_gui() -> None:
     app = CongVanApp()
     app.mainloop()
-

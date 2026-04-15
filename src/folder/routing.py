@@ -9,9 +9,8 @@ Rules (CRITICAL — do not change):
     land in the wrong local-date folder.
 
 Fallback:
-  - If root_folder is unreachable (e.g. WinError 53 — network path not found),
-    automatically fall back to fallback_output_folder.
-  - fallback_output_folder="" → ~/Desktop/ToolXuLyMailCongVan
+  - If root_folder is unreachable, automatically fall back to fallback_output_folder.
+  - fallback_output_folder="" → ~/Desktop/CongVanExport
 """
 from __future__ import annotations
 
@@ -53,8 +52,8 @@ def get_date_folder_name(
 
 
 def _default_fallback_root() -> Path:
-    """~/Desktop/ToolXuLyMailCongVan — always writable on any Windows machine."""
-    return Path.home() / "Desktop" / "ToolXuLyMailCongVan"
+    """~/Desktop/CongVanExport — local fallback for source/dev runs."""
+    return Path.home() / "Desktop" / "CongVanExport"
 
 
 def get_tool_export_folder(date_folder_name: str) -> Path:
@@ -82,7 +81,7 @@ def get_daily_folder(
     Build and create the daily folder path.
 
     Tries root_folder first. If that fails with OSError (e.g. network
-    unavailable), falls back to fallback_folder (or ~/Desktop/ToolXuLyMailCongVan).
+    unavailable), falls back to fallback_folder (or ~/Desktop/CongVanExport).
 
     Returns:
         (daily_path, used_fallback)
@@ -94,21 +93,21 @@ def get_daily_folder(
     folder_name = get_date_folder_name(received_datetime_str, date_format)
 
     # ── Try primary path ───────────────────────────────────────────────────
-    primary = Path(root_folder) / folder_name
+    primary = Path(root_folder).expanduser() / folder_name
     try:
         primary.mkdir(parents=True, exist_ok=True)
         logger.debug("Daily folder ready (primary): %s", primary)
         return primary, False
     except OSError as primary_err:
         logger.warning(
-            "⚠ Network folder không truy cập được: %s\n"
+            "⚠ Thư mục output không truy cập được: %s\n"
             "  Lỗi: %s\n"
             "  → Chuyển sang thư mục dự phòng trên Desktop.",
             root_folder, primary_err,
         )
 
     # ── Fallback path ──────────────────────────────────────────────────────
-    fb_root = Path(fallback_folder) if fallback_folder else _default_fallback_root()
+    fb_root = Path(fallback_folder).expanduser() if fallback_folder else _default_fallback_root()
     fallback = fb_root / folder_name
     try:
         fallback.mkdir(parents=True, exist_ok=True)
@@ -117,5 +116,3 @@ def get_daily_folder(
     except OSError as fb_err:
         logger.error("Cả hai đường dẫn đều không tạo được: %s", fb_err)
         raise
-
-

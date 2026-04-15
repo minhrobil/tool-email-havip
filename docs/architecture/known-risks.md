@@ -37,7 +37,7 @@
 
 ### RISK-005: Dedup State Split Between Disk Locations
 - **Location:** `src/dedup/manager.py`, `src/folder/routing.py`
-- **Risk:** `_processed.json` lives in `~/.tool_mail_cong_van/<date>/` (always local). The Excel file and PDF documents live in `\\LIENDO\...\<date>/` (network). If the network folder is available but the local `~/.tool_mail_cong_van/` is wiped (e.g., by IT policy), dedup records are lost and all previously processed emails will be re-processed.
+- **Risk:** `_processed.json` lives in `~/.tool_mail_cong_van/<date>/` (always local). The Excel file and PDF documents live in the configured output folder. If the local `~/.tool_mail_cong_van/` is wiped, dedup records are lost and all previously processed emails will be re-processed.
 - **Mitigation:** On re-process, duplicate rows will appear in Excel. Manual dedup needed.
 
 ### RISK-006: Playwright Chromium Not Installed
@@ -55,10 +55,10 @@
 - **Risk:** Token cache is stored at `~/.tool_mail_cong_van/token_cache.bin` in the user's home directory. If multiple Windows users share the same machine profile, tokens are separate (correct). But if the tool is deployed as a system service running as SYSTEM, `Path.home()` may not point to the expected user directory.
 - **Mitigation:** Intended for personal desktop use only.
 
-### RISK-009: Network UNC Path in Config
+### RISK-009: Output Folder Unavailable
 - **Location:** `config.json:output.root_folder`
-- **Risk:** The UNC path `\\LIENDO\Havip - Tài liệu\...` contains Vietnamese characters (spaces and accented paths). On some network configurations, Windows may fail to resolve paths with non-ASCII characters.
-- **Mitigation:** `get_daily_folder()` catches `OSError` and falls back to `~/Desktop/ToolXuLyMailCongVan`. Files saved there need to be manually moved.
+- **Risk:** The configured output folder may be missing, unavailable, or not writable.
+- **Mitigation:** `get_daily_folder()` catches `OSError` and falls back to `fallback_output_folder` or `~/Desktop/CongVanExport`.
 
 ### RISK-010: PyInstaller + Playwright Bundling
 - **Location:** `build.bat`
@@ -93,4 +93,3 @@
 - **Location:** `src/excel/writer.py:_load_or_create()`
 - **Risk:** If the Excel file is corrupted (e.g., partial write during power outage), `openpyxl.load_workbook()` raises `IOError`. The tool stops processing all emails for that day.
 - **Mitigation:** Error message suggests renaming/deleting the file to start fresh. No automatic recovery.
-

@@ -249,7 +249,7 @@ class EmailProcessor:
             cfg.output.fallback_output_folder,
         )
         if used_fallback:
-            log(f"  ⚠ Network không khả dụng → lưu vào Desktop: {daily_folder}")
+            log(f"  ⚠ Thư mục output không khả dụng → lưu vào Desktop: {daily_folder}")
         folder_name = get_date_folder_name(msg.received_datetime, cfg.output.date_folder_format)
 
         # ── Pre-dedup: quick technical check before expensive download ──────
@@ -536,10 +536,10 @@ class EmailProcessor:
 
 def _make_seq_filename(seq: int, stem: str, suffix: str) -> str:
     """
-    Build the renamed filename: {seq}{stem}{suffix}
-    Example:  3thongbao.pdf
+    Build the renamed filename: {seq}-{stem}{suffix}
+    Example:  3-thongbao.pdf
     """
-    return f"{seq}{stem}{suffix}"
+    return f"{seq}-{stem}{suffix}"
 
 
 def _rename_downloaded_files(
@@ -547,7 +547,7 @@ def _rename_downloaded_files(
     seq: int,
 ) -> Tuple[List[Path], List[str]]:
     """
-    Rename each downloaded file to {seq}{original_name}.
+    Rename each downloaded file to {seq}-{original_name}.
     Falls back to the original name on OS error.
     Returns (new_path_list, new_filename_list).
     """
@@ -563,7 +563,7 @@ def _rename_downloaded_files(
         # Avoid clobbering an unrelated file with the same target name
         counter = 1
         while new_path.exists() and new_path.resolve() != path.resolve():
-            new_path = path.parent / f"{seq}{path.stem}_{counter}{path.suffix}"
+            new_path = path.parent / f"{seq}-{path.stem}_{counter}{path.suffix}"
             counter += 1
 
         try:
@@ -615,4 +615,3 @@ def _log_run_summary(
         parsed.so_cong_van or "?",
         notes_str,
     )
-

@@ -24,7 +24,7 @@
 | Excel export | `src/excel/writer.py` | `ExcelWriter` |
 | Auto-scan scheduler | `src/gui/app.py` | `_scheduler_loop()`, `_do_auto_scan()` |
 | Excel-locked dialog | `src/gui/app.py` | `_ask_excel_locked()`, `_confirm_close_excel()` |
-| Network fallback | `src/folder/routing.py` | `get_daily_folder()` fallback path |
+| Output folder fallback | `src/folder/routing.py` | `get_daily_folder()` fallback path |
 | Run log / scan summary | `src/processor/email_processor.py` | `_log_run_summary()` (standard logging) |
 | Task Scheduler setup | `setup_scheduler.bat` | Windows schtasks |
 
@@ -142,10 +142,9 @@
 - **Slot key:** `(day_of_year, hour)` — prevents double-fire in same hour
 - **Entry:** `_do_auto_scan()` → updates date vars → calls `_do_scan()`
 
-### 9. Network Fallback (`src/folder/routing.py`)
+### 9. Output Folder Fallback (`src/folder/routing.py`)
 
-- `get_daily_folder()` tries primary `root_folder` (UNC path `\\LIENDO\...`)
-- On `OSError` (WinError 53 = network path not found): falls back to `fallback_output_folder` or `~/Desktop/ToolXuLyMailCongVan`
+- `get_daily_folder()` tries primary `root_folder` (default `~/Desktop/CongVanExport`)
+- On `OSError`: falls back to `fallback_output_folder` or `~/Desktop/CongVanExport`
 - Returns `(path, used_fallback)` tuple
 - `_processed.json` always goes to `~/.tool_mail_cong_van/` (always local)
-

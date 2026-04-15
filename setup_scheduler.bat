@@ -1,39 +1,34 @@
 @echo off
+setlocal
 :: ─────────────────────────────────────────────────────────────────────────
 :: setup_scheduler.bat  —  Register daily Task Scheduler job
 ::
 :: Run this script ONCE as Administrator to schedule automatic daily runs.
 :: The task will run at 08:00 every day.
-::
-:: Auto-detects mode:
-::   - If dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe exists → dùng .exe
-::   - Otherwise → dùng run_headless.bat (cần Python)
 :: ─────────────────────────────────────────────────────────────────────────
 chcp 65001 > nul
+cd /d "%~dp0"
 
 echo ================================================================
 echo  Tool Xu Ly Mail Cong Van - Task Scheduler Setup
 echo ================================================================
 echo.
 
-set TASK_NAME=ToolXuLyMailCongVan
-set TASK_DESC=Tu dong xu ly email cong van hang ngay luc 8:00 sang
-set RUN_TIME=08:00
-set EXE_PATH=%~dp0dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe
-set LOG_FILE=%~dp0_scheduler_run.log
+set "TASK_NAME=ToolXuLyMailCongVan"
+set "TASK_DESC=Tu dong xu ly email cong van hang ngay luc 8:00 sang"
+set "RUN_TIME=08:00"
+set "HEADLESS_BAT=%~dp0run_headless.bat"
+set "TASK_CMD=%COMSPEC% /d /c ""%HEADLESS_BAT%"""
+set "RUN_AS=%USERDOMAIN%\%USERNAME%"
 
-:: ── Auto-detect: .exe hoặc Python script ──────────────────────────────────
-if exist "%EXE_PATH%" (
-    echo [MODE] Dung ban .exe da build:
-    echo        %EXE_PATH%
-    set TASK_CMD="%EXE_PATH%" --headless --log-file "%LOG_FILE%"
-) else (
-    echo [MODE] Dung Python script (run_headless.bat):
-    echo        %~dp0run_headless.bat
-    echo.
-    echo NOTE: Chua tim thay .exe. Neu muon dung .exe, chay build.bat truoc.
-    set TASK_CMD="%~dp0run_headless.bat"
+if not exist "%HEADLESS_BAT%" (
+    echo [ERROR] Khong tim thay run_headless.bat trong source tree.
+    pause
+    exit /b 1
 )
+
+echo [MODE] Dung Python source tree:
+echo        %HEADLESS_BAT%
 
 echo.
 echo This will create a daily scheduled task named "%TASK_NAME%".
@@ -57,10 +52,9 @@ schtasks /create ^
   /tr "%TASK_CMD%" ^
   /sc DAILY ^
   /st %RUN_TIME% ^
-  /ru "%USERNAME%" ^
+  /ru "%RUN_AS%" ^
   /rl HIGHEST ^
   /f ^
-  /sd %DATE% ^
   /it
 
 if %errorlevel% equ 0 (
@@ -70,7 +64,6 @@ if %errorlevel% equ 0 (
     echo   Task name : %TASK_NAME%
     echo   Runs at   : %RUN_TIME% every day
     echo   Command   : %TASK_CMD%
-    echo   Log file  : %LOG_FILE%
     echo.
     echo To view the task:  Open Task Scheduler → Task Scheduler Library
     echo To remove task  :  schtasks /delete /tn "%TASK_NAME%" /f

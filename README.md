@@ -47,18 +47,33 @@ checking for direct email attachments (configurable via `portal.fallback_to_atta
 
 ---
 
-## Quick Start (End Users)
+## Quick Start (macOS Dev)
 
-1. **First-time setup**: Edit `config.json` → set your `azure.client_id` (see below)
-2. **Install Playwright browser** (one-time): open a terminal and run:
-   ```
-   pip install playwright
-   playwright install chromium
-   ```
-3. Double-click **`run.bat`** to open the application
+Use the macOS shell scripts while developing locally:
+
+```bash
+./setup.sh
+./run.sh
+./run_headless.sh
+./setup_scheduler.sh        # optional launchd job at 08:00
+```
+
+- `setup.sh`: tạo `.venv`, cài dependencies, cài Playwright Chromium, chạy test
+- `run.sh`: mở GUI từ source trên macOS
+- `run_headless.sh`: chạy headless từ source trên macOS
+- `setup_scheduler.sh`: tạo `launchd` job trong `~/Library/LaunchAgents/`
+- `build.sh`: chỉ nhắc rằng build `.exe` phải thực hiện trên Windows
+
+## Quick Start (End Users on Windows)
+
+Use the packaged Windows build from `dist\ToolXuLyMailCongVan\`.
+
+1. Edit `dist\ToolXuLyMailCongVan\config.json` → set your `azure.client_id` and output folder
+2. Ensure Playwright Chromium is available on the target machine (see deployment notes below)
+3. Double-click **`ToolXuLyMailCongVan.exe`** to open the application
 4. Click **"🔑 Đăng nhập Microsoft"** → sign in once in the browser
 5. Click **"📥 Quét mail"** to process emails
-6. Click **"📂 Mở thư mục gốc"** to open the output folder in Explorer
+6. Optional: right-click `dist\ToolXuLyMailCongVan\setup_scheduler.bat` → **Run as administrator**
 
 After the first sign-in, you never need to sign in again (token cached automatically).
 
@@ -95,7 +110,7 @@ You need to register a free Azure AD application to allow the tool to read your 
     "page_size": 50
   },
   "output": {
-    "root_folder": "\\\\LIENDO\\Havip - Tài liệu\\NHAN HIEU\\@Nhan hieu Vietnam\\Nhan cong van tu IPVN",
+    "root_folder": "~/Desktop/CongVanExport",
     "excel_filename": "SO CONG VAN DEN-LIENDO.xlsx",
     "date_folder_format": "%y.%m.%d"
   },
@@ -134,7 +149,7 @@ You need to register a free Azure AD application to allow the tool to read your 
 ## Output Structure
 
 ```
-\\LIENDO\Havip - Tài liệu\NHAN HIEU\@Nhan hieu Vietnam\Nhan cong van tu IPVN\
+~/Desktop/CongVanExport/
 └── 26.04.14\                          ← one folder per email received date
     ├── SO CONG VAN DEN-LIENDO.xlsx   ← Excel with DATA and META sheets
     ├── thong_bao_12345.pdf            ← downloaded from portal
@@ -171,7 +186,11 @@ You need to register a free Azure AD application to allow the tool to read your 
 build.bat
 ```
 
-Output: `dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe`
+Output:
+
+- `dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe`
+- `dist\ToolXuLyMailCongVan\run_headless.bat`
+- `dist\ToolXuLyMailCongVan\setup_scheduler.bat`
 
 **Note**: Playwright's Chromium browser must be separately installed on the target machine:
 ```bat
@@ -190,18 +209,18 @@ Sau khi build, copy toàn bộ thư mục `dist\ToolXuLyMailCongVan\` sang máy 
 | Chạy GUI | `run.bat` | `ToolXuLyMailCongVan.exe` |
 | Đăng nhập lần đầu | `run.bat` → click Đăng nhập | `ToolXuLyMailCongVan.exe` → click Đăng nhập |
 | Chạy headless thủ công | `run_headless.bat` | `ToolXuLyMailCongVan.exe --headless` |
-| Cài schedule tự động | `setup_scheduler.bat` | `setup_scheduler.bat` (tự dùng `.exe` nếu đã build) |
+| Cài schedule tự động | `setup_scheduler.bat` | `dist\ToolXuLyMailCongVan\setup_scheduler.bat` |
 | Cần Python? | ✅ Có | ❌ Không |
 
-> **`setup_scheduler.bat` tự phát hiện**: nếu `.exe` đã tồn tại trong `dist\`, scheduler sẽ
-> gọi `ToolXuLyMailCongVan.exe --headless` thay vì `run_headless.bat`.
+> Trong bản dist Windows, `setup_scheduler.bat` đã được build ra sẵn và chạy bằng
+> `run_headless.bat` nội bộ trong cùng thư mục dist.
 
 ---
 
 ## Automatic Daily Execution (Task Scheduler)
 
 1. Đăng nhập lần đầu bằng cách chạy GUI (`run.bat` hoặc `ToolXuLyMailCongVan.exe`) → click **"Đăng nhập Microsoft"**
-2. Right-click **`setup_scheduler.bat`** → **Run as administrator**
+2. Right-click **`setup_scheduler.bat`** trong thư mục dist → **Run as administrator**
 3. The tool will automatically run at 08:00 every day
 
 To manually trigger: right-click **`run_headless.bat`** → Run (hoặc chạy `ToolXuLyMailCongVan.exe --headless`)  
@@ -291,7 +310,7 @@ Within each daily folder (priority order):
 | "azure.client_id is not set" | Set your Azure App client_id in `config.json` |
 | "Không tìm thấy thư mục Công văn" | Check folder name in Outlook Web; update `mail.target_folder_name` |
 | "Cannot save Excel — file may be open" | Close the Excel file and re-run |
-| Network folder unreachable | Reconnect VPN/LAN; check `\\LIENDO` is accessible |
+| Output folder unreachable | Select another output folder in the app or update `config.json` |
 | Token expired in headless mode | Run `run.bat` once to refresh login |
 
 ---
@@ -322,8 +341,15 @@ mail-extract/
 │   └── test_portal_extractor.py    ← NEW
 ├── config.json                     ← Edit this (includes portal section)
 ├── requirements.txt                ← includes playwright
-├── run.bat                         Launch GUI
-├── run_headless.bat                Launch headless (Task Scheduler)
-├── setup_scheduler.bat             Register daily task
+├── setup.sh                        First-time setup on macOS
+├── run.sh                          Launch GUI on macOS
+├── run_headless.sh                 Launch headless on macOS
+├── setup_scheduler.sh              Register daily launchd job on macOS
+├── build.sh                        Explain Windows-only build flow on macOS
+├── setup.bat                       Legacy Windows source setup
+├── run.bat                         Legacy Windows source GUI launcher
+├── run_headless.bat                Legacy Windows source headless launcher
+├── setup_scheduler.bat             Legacy Windows source Task Scheduler setup
+├── packaging/windows/              Dist-ready Windows helper scripts
 └── build.bat                       Build .exe
 ```
