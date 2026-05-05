@@ -37,30 +37,38 @@ from ..processor.email_processor import EmailProcessor, ProcessResult
 logger = logging.getLogger(__name__)
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────
-_NAVY       = "#1A2E4A"
-_NAVY_LIGHT = "#243D5E"
-_BLUE       = "#2E75B6"
-_WHITE      = "#FFFFFF"
-_BG         = "#F4F6F9"
-_CARD_BG    = "#FFFFFF"
-_BORDER     = "#DDE3EC"
-_TEXT       = "#1C1C1E"
-_TEXT_MUTED = "#6B7280"
-_GREEN      = "#27AE60"
-_ORANGE     = "#E67E22"
-_RED        = "#E74C3C"
-_FONT       = "Segoe UI"
-_VERSION    = "2.0"
+# ── Design Tokens ─────────────────────────────────────────────────────────
+_PRIMARY     = "#4F46E5"   # Indigo
+_PRIMARY_H   = "#4338CA"   # Indigo hover
+_PRIMARY_D   = "#3730A3"   # Indigo dark
+_ACCENT      = "#06B6D4"   # Cyan
+_SUCCESS     = "#10B981"   # Emerald
+_SUCCESS_H   = "#059669"
+_WARNING     = "#F59E0B"   # Amber
+_ERROR       = "#EF4444"   # Red
+_ERROR_H     = "#DC2626"
 
-# Disabled button appearance — neutral gray so text is still legible
-_DISABLED_BG = "#9CA3AF"
-_DISABLED_FG = "#F3F4F6"
+_BG          = "#F1F5F9"   # Slate-100
+_CARD_BG     = "#FFFFFF"
+_HEADER_BG   = "#1E293B"   # Slate-800
+_HEADER_LIGHT= "#334155"   # Slate-700
+_BORDER      = "#E2E8F0"   # Slate-200
+_SHADOW      = "#CBD5E1"   # Slate-300
+_TEXT         = "#0F172A"   # Slate-900
+_TEXT_SEC     = "#475569"   # Slate-600
+_TEXT_MUTED   = "#94A3B8"   # Slate-400
+_WHITE        = "#FFFFFF"
 
-_APP_TITLE  = "Xử lý Mail công văn"
+_FONT        = "Segoe UI"
+_VERSION     = "2.0"
+
+_DISABLED_BG = "#CBD5E1"
+_DISABLED_FG = "#F1F5F9"
+
+_APP_TITLE   = "Xử lý Mail công văn"
 
 _DEFAULT_EXPORT  = str(pathlib.Path.home() / "Desktop" / "CongVanExport")
-_LOGIN_TIMEOUT   = 120   # seconds — countdown before auto-reset
+_LOGIN_TIMEOUT   = 120
 
 # Auto-scan frequency options (display label → hours)
 _FREQ_HOURS: dict = {
@@ -107,14 +115,117 @@ def _open_folder_in_file_manager(folder: pathlib.Path) -> None:
         subprocess.Popen(["xdg-open", os.fspath(folder)])
 
 
+# ── Reusable hover helper ─────────────────────────────────────────────────
+def _bind_hover(widget, enter_bg, leave_bg, enter_fg=None, leave_fg=None):
+    """Attach hover color transitions to a widget."""
+    def on_enter(e):
+        if widget.cget("state") != "disabled":
+            widget.config(bg=enter_bg)
+            if enter_fg:
+                widget.config(fg=enter_fg)
+    def on_leave(e):
+        if widget.cget("state") != "disabled":
+            widget.config(bg=leave_bg)
+            if leave_fg:
+                widget.config(fg=leave_fg)
+    widget.bind("<Enter>", on_enter)
+    widget.bind("<Leave>", on_leave)
+
+
+class _ShadowCard(tk.Frame):
+    """A card frame with a subtle shadow effect using a border trick."""
+    def __init__(self, parent, **kw):
+        shadow = tk.Frame(parent, bg=_SHADOW)
+        shadow.pack(fill=tk.X, padx=20, pady=(0, 2))
+        # The "shadow" is just a 1px bottom/right colored border
+        super().__init__(shadow, bg=_CARD_BG,
+                         highlightbackground=_BORDER, highlightthickness=1, **kw)
+        self.pack(fill=tk.X, padx=(0, 2), pady=(0, 2))
+        self._shadow = shadow
+
+    def pack(self, **kw):
+        # Only pack the shadow wrapper externally
+        if kw:
+            self._shadow.pack(**kw)
+        else:
+            super().pack(fill=tk.X)
+
+    def pack_configure(self, **kw):
+        self._shadow.pack_configure(**kw)
+
+
+class _GradientProgressBar(tk.Canvas):
+    """Custom canvas-based progress bar with gradient fill and text overlay."""
+    def __init__(self, parent, height=20, **kw):
+        super().__init__(parent, height=height, bg=_BORDER,
+                         highlightthickness=0, bd=0, **kw)
+        self._value = 0
+        self._height = height
+        self.bind("<Configure>", self._redraw)
+
+    def set_value(self, pct: int):
+        self._value = max(0, min(100, pct))
+        self._redraw()
+
+    def _redraw(self, event=None):
+        self.delete("all")
+        w = self.winfo_width() or 300
+        h = self._height
+
+        # Background track (rounded rect via rectangle — Tkinter limitation)
+        self.create_rectangle(0, 0, w, h, fill=_BORDER, outline="")
+
+        if self._value > 0:
+            fill_w = int(w * self._value / 100)
+            # Gradient simulation: left portion primary, right portion lighter
+            mid = fill_w // 2
+            self.create_rectangle(0, 0, mid, h, fill=_PRIMARY, outline="")
+            self.create_rectangle(mid, 0, fill_w, h, fill=_ACCENT, outline="")
+
+        # Text overlay
+        if self._value > 0:
+            txt_color = _WHITE if self._value > 50 else _TEXT
+            self.create_text(w // 2, h // 2, text=f"{self._value}%",
+                             font=(_FONT, 8, "bold"), fill=txt_color)
+
+
+class _Toast(tk.Frame):
+    """In-app toast notification that auto-dismisses."""
+    def __init__(self, parent, message: str, kind: str = "info", duration: int = 3000):
+        colors = {
+            "info":    (_PRIMARY, _WHITE),
+            "success": (_SUCCESS, _WHITE),
+            "warning": (_WARNING, _TEXT),
+            "error":   (_ERROR, _WHITE),
+        }
+        bg, fg = colors.get(kind, colors["info"])
+        super().__init__(parent, bg=bg, padx=16, pady=8)
+        tk.Label(self, text=message, font=(_FONT, 9), bg=bg, fg=fg,
+                 wraplength=500).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        close_btn = tk.Label(self, text="✕", font=(_FONT, 10, "bold"),
+                             bg=bg, fg=fg, cursor="hand2", padx=8)
+        close_btn.pack(side=tk.RIGHT)
+        close_btn.bind("<Button-1>", lambda e: self.destroy())
+        self.pack(fill=tk.X, padx=20, pady=(4, 0))
+        self.lift()
+        if duration > 0:
+            self.after(duration, self._fade_out)
+
+    def _fade_out(self):
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+
 class CongVanApp(tk.Tk):
     """Main application window."""
 
     def __init__(self) -> None:
         super().__init__()
         self.title(_APP_TITLE)
-        self.geometry("640x730")
-        self.minsize(580, 680)
+        self.geometry("700x780")
+        self.minsize(620, 720)
         self.configure(bg=_BG)
         self.resizable(True, True)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -183,37 +294,55 @@ class CongVanApp(tk.Tk):
     def _build_login_frame(self) -> tk.Frame:
         f = tk.Frame(self, bg=_BG)
 
-        tk.Label(f, text="", bg=_BG, height=3).pack()
-        tk.Label(f, text="📬", font=(_FONT, 48), bg=_BG, fg=_NAVY).pack()
+        # Center container
+        center = tk.Frame(f, bg=_BG)
+        center.place(relx=0.5, rely=0.45, anchor="center")
 
+        # Icon
+        tk.Label(center, text="📬", font=(_FONT, 56), bg=_BG, fg=_PRIMARY).pack()
+
+        # Title
         tk.Label(
-            f, text=_APP_TITLE,
-            font=(_FONT, 20, "bold"), bg=_BG, fg=_NAVY,
-        ).pack(pady=(6, 2))
+            center, text=_APP_TITLE,
+            font=(_FONT, 22, "bold"), bg=_BG, fg=_HEADER_BG,
+        ).pack(pady=(10, 4))
 
+        # Subtitle
         tk.Label(
-            f, text="Tự động xử lý công văn từ Cục Sở hữu trí tuệ",
-            font=(_FONT, 10), bg=_BG, fg=_TEXT_MUTED,
-        ).pack()
+            center, text="Tự động xử lý công văn từ Cục Sở hữu trí tuệ",
+            font=(_FONT, 10), bg=_BG, fg=_TEXT_SEC,
+        ).pack(pady=(0, 24))
 
-        tk.Label(f, text="", bg=_BG, height=2).pack()
+        # Login card
+        login_card = tk.Frame(center, bg=_CARD_BG,
+                              highlightbackground=_BORDER, highlightthickness=1)
+        login_card.pack(padx=40, pady=8)
+
+        inner = tk.Frame(login_card, bg=_CARD_BG, padx=32, pady=24)
+        inner.pack()
+
+        tk.Label(inner, text="Đăng nhập để bắt đầu",
+                 font=(_FONT, 11), bg=_CARD_BG, fg=_TEXT_SEC).pack(pady=(0, 16))
 
         self._login_btn = tk.Button(
-            f, text="🔑   Đăng nhập Microsoft",
+            inner, text="🔑   Đăng nhập Microsoft",
             command=self._do_login,
             font=(_FONT, 12, "bold"),
-            bg=_BLUE, fg=_WHITE,
-            activebackground=_NAVY, activeforeground=_WHITE,
+            bg=_PRIMARY, fg=_WHITE,
+            activebackground=_PRIMARY_D, activeforeground=_WHITE,
             relief=tk.FLAT, padx=30, pady=12, cursor="hand2", bd=0,
         )
-        self._login_btn.pack(ipadx=10)
+        self._login_btn.pack(ipadx=10, fill=tk.X)
+        _bind_hover(self._login_btn, _PRIMARY_H, _PRIMARY)
 
         self._login_status = tk.Label(
-            f, text="",
-            font=(_FONT, 9), bg=_BG, fg=_TEXT_MUTED,
+            inner, text="",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_MUTED,
+            wraplength=300,
         )
-        self._login_status.pack(pady=10)
+        self._login_status.pack(pady=(12, 0))
 
+        # Footer
         tk.Label(
             f, text=f"v{_VERSION}  •  Powered by Microsoft Graph API",
             font=(_FONT, 8), bg=_BG, fg=_TEXT_MUTED,
@@ -229,43 +358,49 @@ class CongVanApp(tk.Tk):
         f = tk.Frame(self, bg=_BG)
 
         # ── Header ────────────────────────────────────────────────────────
-        header = tk.Frame(f, bg=_NAVY, pady=12)
+        header = tk.Frame(f, bg=_HEADER_BG, pady=14)
         header.pack(fill=tk.X)
 
         tk.Label(
             header, text=f"📬  {_APP_TITLE}",
-            font=(_FONT, 13, "bold"), bg=_NAVY, fg=_WHITE,
-        ).pack(side=tk.LEFT, padx=18)
+            font=(_FONT, 14, "bold"), bg=_HEADER_BG, fg=_WHITE,
+        ).pack(side=tk.LEFT, padx=20)
 
         self._logout_btn = tk.Button(
             header, text="Đăng xuất",
             command=self._do_logout,
-            font=(_FONT, 8), bg=_NAVY_LIGHT, fg="#AAC4E0",
-            activebackground=_RED, activeforeground=_WHITE,
-            relief=tk.FLAT, padx=10, pady=4, cursor="hand2", bd=0,
+            font=(_FONT, 8), bg=_HEADER_LIGHT, fg="#94A3B8",
+            activebackground=_ERROR, activeforeground=_WHITE,
+            relief=tk.FLAT, padx=12, pady=5, cursor="hand2", bd=0,
         )
-        self._logout_btn.pack(side=tk.RIGHT, padx=12)
+        self._logout_btn.pack(side=tk.RIGHT, padx=14)
+        _bind_hover(self._logout_btn, _ERROR, _HEADER_LIGHT, _WHITE, "#94A3B8")
+
+        # Status dot + user label
+        self._status_dot = tk.Label(
+            header, text="●", font=(_FONT, 10), bg=_HEADER_BG, fg=_SUCCESS,
+        )
+        self._status_dot.pack(side=tk.RIGHT, padx=(0, 4))
 
         self._user_label = tk.Label(
             header, text="",
-            font=(_FONT, 9), bg=_NAVY, fg="#AAC4E0",
+            font=(_FONT, 9), bg=_HEADER_BG, fg="#94A3B8",
         )
-        self._user_label.pack(side=tk.RIGHT, padx=4)
+        self._user_label.pack(side=tk.RIGHT, padx=(0, 2))
 
-        # ── Notebook (2 tabs) ──────────────────────────────────────────────
+        # ── Style setup ───────────────────────────────────────────────────
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure(
-            "CongVan.Horizontal.TProgressbar",
-            troughcolor=_BORDER, background=_BLUE,
-            thickness=14, borderwidth=0,
-        )
 
-        # ── Footer (packed first so it anchors to the bottom) ──────────────
+        # ── Toast area ────────────────────────────────────────────────────
+        self._toast_area = tk.Frame(f, bg=_BG)
+        self._toast_area.pack(fill=tk.X)
+
+        # ── Footer (packed first so it anchors to the bottom) ─────────────
         tk.Label(
             f, text=f"v{_VERSION}  •  Powered by Microsoft Graph API",
             font=(_FONT, 8), bg=_BG, fg=_TEXT_MUTED,
-        ).pack(side=tk.BOTTOM, pady=6)
+        ).pack(side=tk.BOTTOM, pady=8)
 
         # ── Custom tab bar ─────────────────────────────────────────────────
         tab_bar = tk.Frame(f, bg=_CARD_BG,
@@ -294,24 +429,25 @@ class CongVanApp(tk.Tk):
                     page.pack_forget()
             for k, (btn, bar) in self._tab_buttons.items():
                 if k == name:
-                    btn.config(fg=_NAVY,      font=(_FONT, 9, "bold"))
-                    bar.config(bg=_BLUE)
+                    btn.config(fg=_PRIMARY, font=(_FONT, 9, "bold"), bg="#EEF2FF")
+                    bar.config(bg=_PRIMARY)
                 else:
-                    btn.config(fg=_TEXT_MUTED, font=(_FONT, 9))
+                    btn.config(fg=_TEXT_MUTED, font=(_FONT, 9), bg=_CARD_BG)
                     bar.config(bg=_CARD_BG)
 
         self._switch_tab = _switch_tab
 
-        for tab_name, tab_label in [("main", "Main"), ("activities", "Activities")]:
+        tab_icons = {"main": "◉  Main", "activities": "◎  Activities"}
+        for tab_name, tab_label in tab_icons.items():
             cell = tk.Frame(tab_bar, bg=_CARD_BG)
             cell.pack(side=tk.LEFT)
             btn = tk.Button(
                 cell, text=tab_label,
                 command=lambda n=tab_name: _switch_tab(n),
                 font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_MUTED,
-                relief=tk.FLAT, bd=0, padx=18, pady=9,
+                relief=tk.FLAT, bd=0, padx=22, pady=10,
                 cursor="hand2",
-                activebackground=_CARD_BG, activeforeground=_NAVY,
+                activebackground="#EEF2FF", activeforeground=_PRIMARY,
             )
             btn.pack()
             indicator = tk.Frame(cell, bg=_CARD_BG, height=3)
@@ -325,30 +461,43 @@ class CongVanApp(tk.Tk):
     def _build_main_tab(self, f: tk.Frame) -> None:
         """Build all widgets for Tab 1 — Main."""
 
-        # ── Config card — grid layout for clean alignment ──────────────────
+        # ── Scrollable container ──────────────────────────────────────────
+        # Wrap everything in a canvas for scrollability on small screens
+        container = tk.Frame(f, bg=_BG)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # ── Config card ───────────────────────────────────────────────────
+        cfg_shadow = tk.Frame(container, bg=_SHADOW)
+        cfg_shadow.pack(fill=tk.X, padx=20, pady=(14, 2))
         cfg_card = tk.Frame(
-            f, bg=_CARD_BG,
+            cfg_shadow, bg=_CARD_BG,
             highlightbackground=_BORDER, highlightthickness=1,
         )
-        cfg_card.pack(fill=tk.X, padx=20, pady=(12, 4))
+        cfg_card.pack(fill=tk.X, padx=(0, 2), pady=(0, 2))
 
-        g = tk.Frame(cfg_card, bg=_CARD_BG, padx=16, pady=12)
+        # Section header
+        cfg_header = tk.Frame(cfg_card, bg=_CARD_BG, padx=18, pady=(12, 0))
+        cfg_header.pack(fill=tk.X)
+        tk.Label(cfg_header, text="⚙  Cấu hình quét",
+                 font=(_FONT, 11, "bold"), bg=_CARD_BG, fg=_TEXT).pack(anchor="w")
+
+        g = tk.Frame(cfg_card, bg=_CARD_BG, padx=18, pady=(8, 14))
         g.pack(fill=tk.X)
-        g.columnconfigure(1, weight=1)   # input column stretches
+        g.columnconfigure(1, weight=1)
 
         def _lbl(text, row, col=0, **kw):
             tk.Label(
                 g, text=text,
-                font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_MUTED,
+                font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_SEC,
                 anchor="e",
-            ).grid(row=row, column=col, sticky="e", padx=(0, 8), pady=4, **kw)
+            ).grid(row=row, column=col, sticky="e", padx=(0, 10), pady=5, **kw)
 
         today = datetime.now()
 
         # Row 0 — date range
         _lbl("Từ:", 0)
         date_cells = tk.Frame(g, bg=_CARD_BG)
-        date_cells.grid(row=0, column=1, sticky="w", pady=4)
+        date_cells.grid(row=0, column=1, sticky="w", pady=5)
 
         self._from_date_var = tk.StringVar(value=today.strftime("%d/%m/%Y 00:00"))
         self._from_date_entry = ttk.Entry(
@@ -359,8 +508,8 @@ class CongVanApp(tk.Tk):
         self._from_date_entry.bind("<Return>",   lambda _e: self._load_and_show_stats())
 
         tk.Label(
-            date_cells, text="  —  Đến:",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_MUTED,
+            date_cells, text="  →  Đến:",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_SEC,
         ).pack(side=tk.LEFT)
 
         self._to_date_var = tk.StringVar(value=today.strftime("%d/%m/%Y 23:59"))
@@ -382,32 +531,33 @@ class CongVanApp(tk.Tk):
         self._mail_folder_entry = ttk.Entry(
             g, textvariable=self._mail_folder_var, font=(_FONT, 9), width=24,
         )
-        self._mail_folder_entry.grid(row=1, column=1, sticky="w", pady=4)
+        self._mail_folder_entry.grid(row=1, column=1, sticky="w", pady=5)
 
         # Row 2 — export folder
         _lbl("Export vào:", 2)
         export_row = tk.Frame(g, bg=_CARD_BG)
-        export_row.grid(row=2, column=1, sticky="ew", pady=4)
+        export_row.grid(row=2, column=1, sticky="ew", pady=5)
         export_row.columnconfigure(0, weight=1)
 
         self._export_folder_var = tk.StringVar(value=_DEFAULT_EXPORT)
         ttk.Entry(
             export_row, textvariable=self._export_folder_var, font=(_FONT, 9),
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
 
         self._choose_folder_btn = tk.Button(
             export_row, text="📁  Chọn…",
             command=self._do_choose_folder,
             font=(_FONT, 9), bg=_BORDER, fg=_TEXT,
-            activebackground=_NAVY_LIGHT, activeforeground=_WHITE,
-            relief=tk.FLAT, padx=8, pady=4, cursor="hand2", bd=0,
+            activebackground=_HEADER_LIGHT, activeforeground=_WHITE,
+            relief=tk.FLAT, padx=10, pady=5, cursor="hand2", bd=0,
         )
         self._choose_folder_btn.grid(row=0, column=1)
+        _bind_hover(self._choose_folder_btn, _SHADOW, _BORDER)
 
         # Row 3 — auto-scan
         _lbl("Tự động quét:", 3)
         auto_cells = tk.Frame(g, bg=_CARD_BG)
-        auto_cells.grid(row=3, column=1, sticky="w", pady=4)
+        auto_cells.grid(row=3, column=1, sticky="w", pady=5)
 
         self._auto_scan_var = tk.BooleanVar(value=True)
         self._auto_scan_cb = tk.Checkbutton(
@@ -421,7 +571,7 @@ class CongVanApp(tk.Tk):
 
         tk.Label(
             auto_cells, text="  Mỗi",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_MUTED,
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_SEC,
         ).pack(side=tk.LEFT)
 
         self._auto_scan_freq_var = tk.StringVar(value="1 giờ")
@@ -433,74 +583,74 @@ class CongVanApp(tk.Tk):
         self._auto_scan_freq_cb.pack(side=tk.LEFT, padx=(4, 0))
 
         # ── Action buttons ─────────────────────────────────────────────────
-        self._btn_row = tk.Frame(f, bg=_BG, pady=12)
+        self._btn_row = tk.Frame(container, bg=_BG, pady=10)
         self._btn_row.pack(fill=tk.X, padx=20)
 
         self._scan_btn = self._big_btn(
-            self._btn_row, "📥   Quét mail", self._do_scan, _BLUE,
+            self._btn_row, "📥   Quét mail", self._do_scan, _PRIMARY,
         )
-        self._scan_btn.pack(side=tk.LEFT, padx=(0, 0))
+        self._scan_btn.pack(side=tk.LEFT)
+        _bind_hover(self._scan_btn, _PRIMARY_H, _PRIMARY)
 
         # "Mở folder" — hidden until first successful export
         self._open_export_btn = self._big_btn(
             self._btn_row, "📂   Mở folder export",
-            self._open_exported_folder, _GREEN,
+            self._open_exported_folder, _SUCCESS,
         )
+        _bind_hover(self._open_export_btn, _SUCCESS_H, _SUCCESS)
         # Not packed yet — shown in _on_scan_done
 
         # ── Progress card ──────────────────────────────────────────────────
+        prog_shadow = tk.Frame(container, bg=_SHADOW)
+        prog_shadow.pack(fill=tk.X, padx=20, pady=(0, 2))
         card = tk.Frame(
-            f, bg=_CARD_BG, relief=tk.FLAT, bd=1,
+            prog_shadow, bg=_CARD_BG, relief=tk.FLAT, bd=0,
             highlightbackground=_BORDER, highlightthickness=1,
         )
-        card.pack(fill=tk.X, padx=20)
+        card.pack(fill=tk.X, padx=(0, 2), pady=(0, 2))
 
-        inner = tk.Frame(card, bg=_CARD_BG, padx=16, pady=12)
+        inner = tk.Frame(card, bg=_CARD_BG, padx=18, pady=14)
         inner.pack(fill=tk.X)
 
         self._step_var = tk.StringVar(value="Sẵn sàng")
         tk.Label(
             inner, textvariable=self._step_var,
             font=(_FONT, 10, "bold"), bg=_CARD_BG, fg=_TEXT,
-            anchor="w", justify=tk.LEFT, wraplength=500,
+            anchor="w", justify=tk.LEFT, wraplength=560,
         ).pack(fill=tk.X)
 
         self._pct_var = tk.StringVar(value="")
         tk.Label(
             inner, textvariable=self._pct_var,
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_MUTED, anchor="w",
-        ).pack(fill=tk.X)
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT_SEC, anchor="w",
+        ).pack(fill=tk.X, pady=(2, 0))
 
         pb_frame = tk.Frame(inner, bg=_CARD_BG, pady=8)
         pb_frame.pack(fill=tk.X)
 
-        self._progress_bar = ttk.Progressbar(
-            pb_frame, style="CongVan.Horizontal.TProgressbar",
-            orient="horizontal", length=300, mode="determinate",
-        )
+        self._progress_bar = _GradientProgressBar(pb_frame, height=18)
         self._progress_bar.pack(fill=tk.X)
-        self._progress_bar["value"] = 0
 
         # ── Dashboard row (3 cards) ─────────────────────────────────────────
-        dash_row = tk.Frame(f, bg=_BG, pady=10)
+        dash_row = tk.Frame(container, bg=_BG, pady=8)
         dash_row.pack(fill=tk.X, padx=20)
 
-        self._dash_found      = self._stat_card(dash_row, "📬 Tìm thấy",      "0", _NAVY)
-        self._dash_processing = self._stat_card(dash_row, "⏳ Đang xử lý",    "0", _ORANGE)
-        self._dash_done       = self._stat_card(dash_row, "✅ Đã xử lý",      "0", _GREEN)
+        self._dash_found      = self._stat_card(dash_row, "📬  Tìm thấy",    "0", _PRIMARY)
+        self._dash_processing = self._stat_card(dash_row, "⏳  Đang xử lý",  "0", _WARNING)
+        self._dash_done       = self._stat_card(dash_row, "✅  Đã xử lý",    "0", _SUCCESS)
 
         for w in (self._dash_found[0], self._dash_processing[0], self._dash_done[0]):
             w.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=4)
 
-        # ── Stats row (4 cards) ────────────────────────────────────────────
-        stats_row = tk.Frame(f, bg=_BG, pady=2)
+        # ── Stats row (5 cards) ────────────────────────────────────────────
+        stats_row = tk.Frame(container, bg=_BG, pady=2)
         stats_row.pack(fill=tk.X, padx=20)
 
-        self._stat_ok          = self._stat_card(stats_row, "✓ Thành công",    "0", _GREEN)
-        self._stat_file_err    = self._stat_card(stats_row, "⚠ Lỗi tải file", "0", _ORANGE)
-        self._stat_missing     = self._stat_card(stats_row, "📋 Thiếu data",   "0", _ORANGE)
+        self._stat_ok          = self._stat_card(stats_row, "✓ Thành công",    "0", _SUCCESS)
+        self._stat_file_err    = self._stat_card(stats_row, "⚠ Lỗi tải file", "0", _WARNING)
+        self._stat_missing     = self._stat_card(stats_row, "📋 Thiếu data",   "0", _WARNING)
         self._stat_dup         = self._stat_card(stats_row, "⟳ Đã có",        "0", _TEXT_MUTED)
-        self._stat_err         = self._stat_card(stats_row, "✗ Lỗi",           "0", _RED)
+        self._stat_err         = self._stat_card(stats_row, "✗ Lỗi",           "0", _ERROR)
 
         for w in (self._stat_ok[0], self._stat_file_err[0], self._stat_missing[0],
                   self._stat_dup[0], self._stat_err[0]):
@@ -509,33 +659,45 @@ class CongVanApp(tk.Tk):
     def _build_activities_tab(self, f: tk.Frame) -> None:
         """Build all widgets for Tab 2 — Activities."""
         outer = tk.Frame(f, bg=_BG)
-        outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=12)
+        outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
 
         hdr = tk.Frame(outer, bg=_BG)
-        hdr.pack(fill=tk.X, pady=(0, 6))
+        hdr.pack(fill=tk.X, pady=(0, 8))
 
         tk.Label(
             hdr, text="📋  Nhật ký hoạt động",
-            font=(_FONT, 10, "bold"), bg=_BG, fg=_TEXT,
+            font=(_FONT, 11, "bold"), bg=_BG, fg=_TEXT,
         ).pack(side=tk.LEFT)
 
-        tk.Button(
+        clear_btn = tk.Button(
             hdr, text="Xoá",
             command=self._clear_log,
-            font=(_FONT, 8), bg=_BORDER, fg=_TEXT_MUTED,
-            activebackground=_RED, activeforeground=_WHITE,
-            relief=tk.FLAT, padx=8, pady=3, cursor="hand2", bd=0,
-        ).pack(side=tk.RIGHT)
+            font=(_FONT, 8), bg=_BORDER, fg=_TEXT_SEC,
+            activebackground=_ERROR, activeforeground=_WHITE,
+            relief=tk.FLAT, padx=10, pady=4, cursor="hand2", bd=0,
+        )
+        clear_btn.pack(side=tk.RIGHT)
+        _bind_hover(clear_btn, _ERROR, _BORDER, _WHITE, _TEXT_SEC)
+
+        # Log text with colored tags
+        log_frame = tk.Frame(outer, bg=_BORDER,
+                             highlightbackground=_BORDER, highlightthickness=1)
+        log_frame.pack(fill=tk.BOTH, expand=True)
 
         self._log_text = scrolledtext.ScrolledText(
-            outer, state=tk.DISABLED,
-            font=("Consolas", 8), bg="#F8F9FA", fg=_TEXT,
-            relief=tk.FLAT, padx=10, pady=8,
+            log_frame, state=tk.DISABLED,
+            font=("Consolas", 9), bg="#FAFBFC", fg=_TEXT,
+            relief=tk.FLAT, padx=12, pady=10,
             wrap=tk.WORD,
         )
         self._log_text.pack(fill=tk.BOTH, expand=True)
 
-
+        # Configure color tags for log entries
+        self._log_text.tag_configure("success", foreground=_SUCCESS)
+        self._log_text.tag_configure("error", foreground=_ERROR)
+        self._log_text.tag_configure("warning", foreground=_WARNING)
+        self._log_text.tag_configure("info", foreground=_PRIMARY)
+        self._log_text.tag_configure("timestamp", foreground=_TEXT_MUTED)
 
     # ═══════════════════════════════════════════════════════════════════════
     # WIDGET HELPERS
@@ -545,30 +707,43 @@ class CongVanApp(tk.Tk):
         return tk.Button(
             parent, text=text, command=cmd,
             font=(_FONT, 11, "bold"), bg=color, fg=_WHITE,
-            activebackground=_NAVY, activeforeground=_WHITE,
+            activebackground=_PRIMARY_D, activeforeground=_WHITE,
             disabledforeground=_DISABLED_FG,
-            relief=tk.FLAT, padx=18, pady=10, cursor="hand2", bd=0,
+            relief=tk.FLAT, padx=20, pady=10, cursor="hand2", bd=0,
         )
 
     def _stat_card(self, parent, label: str, value: str, color: str):
         """Returns (frame, value_var)."""
+        # Shadow wrapper
+        shadow = tk.Frame(parent, bg=_SHADOW)
+
         card = tk.Frame(
-            parent, bg=_CARD_BG,
+            shadow, bg=_CARD_BG,
             highlightbackground=_BORDER, highlightthickness=1,
         )
-        inner = tk.Frame(card, bg=_CARD_BG, padx=8, pady=8)
+        card.pack(fill=tk.BOTH, expand=True, padx=(0, 2), pady=(0, 2))
+
+        inner = tk.Frame(card, bg=_CARD_BG, padx=6, pady=10)
         inner.pack(fill=tk.BOTH, expand=True)
 
         val_var = tk.StringVar(value=value)
         tk.Label(
             inner, textvariable=val_var,
-            font=(_FONT, 20, "bold"), bg=_CARD_BG, fg=color,
+            font=(_FONT, 22, "bold"), bg=_CARD_BG, fg=color,
         ).pack()
         tk.Label(
             inner, text=label,
-            font=(_FONT, 8), bg=_CARD_BG, fg=_TEXT_MUTED,
-        ).pack()
-        return card, val_var
+            font=(_FONT, 8), bg=_CARD_BG, fg=_TEXT_SEC,
+        ).pack(pady=(2, 0))
+        return shadow, val_var
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # TOAST HELPER
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def _show_toast(self, message: str, kind: str = "info", duration: int = 3000) -> None:
+        """Show an in-app toast notification."""
+        _Toast(self._toast_area, message, kind, duration)
 
     # ═══════════════════════════════════════════════════════════════════════
     # LOG PANEL HELPERS
@@ -578,9 +753,24 @@ class CongVanApp(tk.Tk):
         """Append a timestamped line to the log panel (must be called on main thread)."""
         try:
             ts = datetime.now().strftime("%H:%M:%S")
-            line = f"[{ts}] {message.strip()}\n"
             self._log_text.config(state=tk.NORMAL)
-            self._log_text.insert(tk.END, line)
+
+            # Insert timestamp with tag
+            self._log_text.insert(tk.END, f"[{ts}] ", "timestamp")
+
+            # Determine message tag based on content
+            msg = message.strip()
+            tag = ""
+            if any(k in msg for k in ("✅", "Hoàn thành", "thành công", "✓")):
+                tag = "success"
+            elif any(k in msg for k in ("❌", "Lỗi", "✗", "lỗi")):
+                tag = "error"
+            elif any(k in msg for k in ("⚠", "cảnh báo", "thiếu")):
+                tag = "warning"
+            elif any(k in msg for k in ("⏰", "▶", "Auto-scan", "📥")):
+                tag = "info"
+
+            self._log_text.insert(tk.END, msg + "\n", tag if tag else None)
             self._log_text.see(tk.END)
             self._log_text.config(state=tk.DISABLED)
         except Exception:
@@ -611,7 +801,7 @@ class CongVanApp(tk.Tk):
         except (FileNotFoundError, ValueError) as exc:
             self._show_login()
             self._login_status.config(
-                text=f"⚠ Lỗi config: {exc}", fg=_RED,
+                text=f"⚠ Lỗi config: {exc}", fg=_ERROR,
             )
             return
 
@@ -623,15 +813,16 @@ class CongVanApp(tk.Tk):
     def _show_login(self) -> None:
         self._main_frame.pack_forget()
         self._login_frame.pack(fill=tk.BOTH, expand=True)
-        self.geometry("480x400")
+        self.geometry("520x460")
 
     def _show_main(self) -> None:
         self._login_in_progress = False
         self._login_frame.pack_forget()
         self._main_frame.pack(fill=tk.BOTH, expand=True)
-        self.geometry("640x730")
+        self.geometry("700x780")
         user = self._auth.get_username() or ""
         self._user_label.config(text=user)
+        self._status_dot.config(fg=_SUCCESS)
         self._start_scheduler()
         self._load_and_show_stats()
 
@@ -731,7 +922,7 @@ class CongVanApp(tk.Tk):
 
         self._login_in_progress = True
         self._login_btn.config(state=tk.DISABLED)
-        self._login_status.config(text="Đang mở trình duyệt…", fg=_TEXT_MUTED)
+        self._login_status.config(text="Đang mở trình duyệt…", fg=_TEXT_SEC)
 
         def _tick(remaining: int) -> None:
             """Called every second by get_token_interactive_force (worker thread)."""
@@ -739,7 +930,7 @@ class CongVanApp(tk.Tk):
             sec  = remaining % 60
             self.after(0, lambda r=remaining: self._login_status.config(
                 text=f"Đang chờ trong trình duyệt…  {mins}:{sec:02d}",
-                fg=_TEXT_MUTED,
+                fg=_TEXT_SEC,
             ))
 
         def _thread() -> None:
@@ -761,11 +952,11 @@ class CongVanApp(tk.Tk):
     def _login_reset(self, msg: str) -> None:
         """Re-enable login button and show a small red error below it."""
         self._login_btn.config(state=tk.NORMAL)
-        self._login_status.config(text=msg, fg=_RED)
+        self._login_status.config(text=msg, fg=_ERROR)
 
     def _do_logout(self) -> None:
         if self._running:
-            messagebox.showwarning("Đang xử lý", "Không thể đăng xuất khi đang quét mail.")
+            self._show_toast("Không thể đăng xuất khi đang quét mail.", "warning")
             return
         if not messagebox.askyesno(
             "Xác nhận đăng xuất",
@@ -775,7 +966,7 @@ class CongVanApp(tk.Tk):
         self._auth.logout()
         self._reset_progress()
         self._show_login()
-        self._login_status.config(text="Đã đăng xuất.", fg=_TEXT_MUTED)
+        self._login_status.config(text="Đã đăng xuất.", fg=_TEXT_SEC)
 
     def _confirm_close_excel(self, locked_files: list) -> bool:
         """
@@ -796,7 +987,7 @@ class CongVanApp(tk.Tk):
 
         tk.Label(
             dlg, text="⚠  File Excel đang được mở",
-            font=(_FONT, 12, "bold"), fg=_ORANGE, bg=_CARD_BG,
+            font=(_FONT, 12, "bold"), fg=_WARNING, bg=_CARD_BG,
             padx=20, pady=14,
         ).pack(fill=tk.X)
 
@@ -817,8 +1008,8 @@ class CongVanApp(tk.Tk):
 
         close_btn = tk.Button(
             btn_row, text="Đóng Excel & Bắt đầu quét",
-            font=(_FONT, 10, "bold"), bg=_BLUE, fg=_WHITE,
-            activebackground=_NAVY, activeforeground=_WHITE,
+            font=(_FONT, 10, "bold"), bg=_PRIMARY, fg=_WHITE,
+            activebackground=_PRIMARY_D, activeforeground=_WHITE,
             relief=tk.FLAT, padx=14, pady=8, cursor="hand2", bd=0,
         )
         close_btn.pack(side=tk.LEFT, padx=(0, 8))
@@ -826,7 +1017,7 @@ class CongVanApp(tk.Tk):
         cancel_btn = tk.Button(
             btn_row, text="Hủy",
             font=(_FONT, 10), bg=_BORDER, fg=_TEXT,
-            activebackground=_RED, activeforeground=_WHITE,
+            activebackground=_ERROR, activeforeground=_WHITE,
             relief=tk.FLAT, padx=14, pady=8, cursor="hand2", bd=0,
         )
         cancel_btn.pack(side=tk.LEFT)
@@ -892,10 +1083,11 @@ class CongVanApp(tk.Tk):
 
         # ── Start scan thread ─────────────────────────────────────────────────
         self._running = True
+        self._status_dot.config(fg=_WARNING)
         # Reset only the progress bar/label — stat cards keep pre-loaded values
         self._step_var.set("Đang kết nối…")
         self._pct_var.set("")
-        self._progress_bar["value"] = 0
+        self._progress_bar.set_value(0)
         self._set_scan_state(False)
         start_msg = f"▶ Bắt đầu quét  {date_from.strftime('%d/%m/%Y %H:%M')} → {date_to.strftime('%d/%m/%Y %H:%M')}"
         logger.info(start_msg)
@@ -927,6 +1119,7 @@ class CongVanApp(tk.Tk):
                     scan_log_fh.close()
                 self._running = False
                 self.after(0, lambda: self._set_scan_state(True))
+                self.after(0, lambda: self._status_dot.config(fg=_SUCCESS))
 
         threading.Thread(target=_thread, daemon=True).start()
 
@@ -966,7 +1159,7 @@ class CongVanApp(tk.Tk):
 
             tk.Label(
                 dlg, text="⚠  File Excel đang được mở",
-                font=(_FONT, 12, "bold"), fg=_ORANGE, bg=_CARD_BG,
+                font=(_FONT, 12, "bold"), fg=_WARNING, bg=_CARD_BG,
                 padx=20, pady=14,
             ).pack(fill=tk.X)
 
@@ -1010,8 +1203,8 @@ class CongVanApp(tk.Tk):
             tk.Button(
                 btn_row, text="Đóng Excel & Thử lại",
                 command=_do_close_excel,
-                font=(_FONT, 10, "bold"), bg=_BLUE, fg=_WHITE,
-                activebackground=_NAVY, activeforeground=_WHITE,
+                font=(_FONT, 10, "bold"), bg=_PRIMARY, fg=_WHITE,
+                activebackground=_PRIMARY_D, activeforeground=_WHITE,
                 relief=tk.FLAT, padx=14, pady=8, cursor="hand2", bd=0,
             ).pack(side=tk.LEFT, padx=(0, 8))
 
@@ -1019,7 +1212,7 @@ class CongVanApp(tk.Tk):
                 btn_row, text="Hủy",
                 command=_do_cancel,
                 font=(_FONT, 10), bg=_BORDER, fg=_TEXT,
-                activebackground=_RED, activeforeground=_WHITE,
+                activebackground=_ERROR, activeforeground=_WHITE,
                 relief=tk.FLAT, padx=14, pady=8, cursor="hand2", bd=0,
             ).pack(side=tk.LEFT)
 
@@ -1068,7 +1261,7 @@ class CongVanApp(tk.Tk):
             # Progress = emails *completed* before the current one:
             #   1/4 → 0 %,  2/4 → 25 %,  3/4 → 50 %,  4/4 → 75 %
             pct = int((current - 1) / total * 100)
-            self._progress_bar["value"] = pct
+            self._progress_bar.set_value(pct)
 
             success = stats.get("success", 0) if stats else 0
             error   = stats.get("error",   0) if stats else 0
@@ -1084,7 +1277,7 @@ class CongVanApp(tk.Tk):
             self._dash_done[1].set(str(base_done + current - 1))
         elif not is_sub_message:
             # Setup phase — reset bar but keep any subtitle already set
-            self._progress_bar["value"] = 0
+            self._progress_bar.set_value(0)
             self._pct_var.set("")
 
         if stats:
@@ -1100,21 +1293,23 @@ class CongVanApp(tk.Tk):
         extracted = result.success_count + result.review_count
         # Progress bar: 100% only if no errors; otherwise proportional to successes
         if total == 0:
-            self._progress_bar["value"] = 0
+            self._progress_bar.set_value(0)
             msg = "⚠  Không tìm thấy email nào trong khoảng thời gian này"
             self._step_var.set(msg)
             self._append_log(msg)
         elif result.error_count == 0:
-            self._progress_bar["value"] = 100
+            self._progress_bar.set_value(100)
             msg = "✅  Hoàn thành"
             self._step_var.set(msg)
             self._append_log(msg)
+            self._show_toast("Quét mail hoàn thành!", "success")
         else:
             ok_pct = int(extracted / total * 100)
-            self._progress_bar["value"] = ok_pct
+            self._progress_bar.set_value(ok_pct)
             msg = f"⚠  Xong: {result.success_count} thành công, {result.error_count} lỗi"
             self._step_var.set(msg)
             self._append_log(msg)
+            self._show_toast(f"{result.error_count} email bị lỗi", "warning")
 
         self._pct_var.set(
             f"{total} email tìm thấy  •  "
@@ -1154,8 +1349,9 @@ class CongVanApp(tk.Tk):
     def _on_scan_error(self, msg: str) -> None:
         self._step_var.set(f"❌  Lỗi: {msg[:80]}")
         self._pct_var.set("Kiểm tra kết nối và thử lại.")
-        self._progress_bar["value"] = 0
+        self._progress_bar.set_value(0)
         self._append_log(f"❌ Lỗi: {msg}")
+        self._show_toast(f"Lỗi: {msg[:60]}", "error", 5000)
 
     def _on_auth_required(self, reason: str) -> None:
         """Called when authentication completely fails — clear cache and go to login screen."""
@@ -1169,13 +1365,13 @@ class CongVanApp(tk.Tk):
         self._show_login()
         self._login_status.config(
             text=f"⚠ Phiên đăng nhập hết hạn hoặc tài khoản bị khóa.\n{reason}",
-            fg=_RED,
+            fg=_ERROR,
         )
 
     def _reset_progress(self) -> None:
         self._step_var.set("Sẵn sàng")
         self._pct_var.set("")
-        self._progress_bar["value"] = 0
+        self._progress_bar.set_value(0)
         self._stat_ok[1].set("0")
         self._stat_file_err[1].set("0")
         self._stat_missing[1].set("0")
@@ -1194,8 +1390,8 @@ class CongVanApp(tk.Tk):
         cursor_btn   = "hand2"     if enabled else "arrow"
 
         if enabled:
-            self._scan_btn.config(state=state_btn, bg=_BLUE, fg=_WHITE, cursor=cursor_btn)
-            self._logout_btn.config(state=state_btn, bg=_NAVY_LIGHT, fg="#AAC4E0", cursor=cursor_btn)
+            self._scan_btn.config(state=state_btn, bg=_PRIMARY, fg=_WHITE, cursor=cursor_btn)
+            self._logout_btn.config(state=state_btn, bg=_HEADER_LIGHT, fg="#94A3B8", cursor=cursor_btn)
             self._choose_folder_btn.config(state=state_btn, bg=_BORDER, fg=_TEXT, cursor=cursor_btn)
         else:
             self._scan_btn.config(state=state_btn, bg=_DISABLED_BG, fg=_DISABLED_FG, cursor=cursor_btn)
@@ -1269,6 +1465,7 @@ class CongVanApp(tk.Tk):
         msg = f"⏰ Auto-scan triggered at {now.strftime('%H:%M')}"
         logger.info(msg)
         self._append_log(msg)
+        self._show_toast(f"Auto-scan bắt đầu lúc {now.strftime('%H:%M')}", "info", 2000)
         self._do_scan()
 
 
