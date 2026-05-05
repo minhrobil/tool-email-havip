@@ -1,0 +1,71 @@
+name: Build Windows EXE
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
+
+      - name: Build EXE with PyInstaller
+        run: |
+          python -m PyInstaller `
+            --name ToolXuLyMailCongVan `
+            --onedir `
+            --windowed `
+            --icon NONE `
+            --add-data "config.json;." `
+            --hidden-import msal `
+            --hidden-import msal.authority `
+            --hidden-import msal.application `
+            --hidden-import fitz `
+            --hidden-import openpyxl `
+            --hidden-import dateutil `
+            --hidden-import dateutil.relativedelta `
+            --hidden-import playwright `
+            --hidden-import playwright.sync_api `
+            --collect-all msal `
+            --collect-all playwright `
+            run_app.py
+
+      - name: Copy helper files into dist
+        run: |
+          copy config.json dist\ToolXuLyMailCongVan\config.json
+          copy packaging\windows\run_headless.dist.bat dist\ToolXuLyMailCongVan\run_headless.bat
+          copy packaging\windows\setup_scheduler.dist.bat dist\ToolXuLyMailCongVan\setup_scheduler.bat
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ToolXuLyMailCongVan-windows
+          path: dist\ToolXuLyMailCongVan\
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe
+          generate_release_notes: true
