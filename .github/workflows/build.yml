@@ -28,6 +28,15 @@ jobs:
       - name: Install Playwright Chromium
         run: python -m playwright install chromium
 
+      - name: Inject Azure client_id into config.json
+        shell: python
+        run: |
+          import json, pathlib
+          cfg = pathlib.Path("config.json")
+          data = json.loads(cfg.read_text(encoding="utf-8"))
+          data["azure"]["client_id"] = "${{ secrets.AZURE_CLIENT_ID }}"
+          cfg.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
       - name: Build EXE with PyInstaller
         run: |
           python -m PyInstaller `

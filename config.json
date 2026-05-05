@@ -2,7 +2,7 @@
   "_comment": "Cong Van Processor - Configuration file. Edit this file to match your environment.",
   "azure": {
     "_comment_client_id": "Register an Azure App: https://portal.azure.com -> App registrations -> New. Platform: Mobile/Desktop, Redirect URI: http://localhost",
-    "client_id": "eca42d04-276c-4437-9168-f0af2b63b2da",
+    "client_id": "YOUR_CLIENT_ID_HERE",
     "tenant_id": "common",
     "authority": "https://login.microsoftonline.com/common",
     "scopes": [
