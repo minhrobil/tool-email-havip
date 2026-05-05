@@ -1,7 +1,7 @@
 # Pattern Cookbook — Công Văn Processor
 
 > Copy-paste templates for common coding tasks. Cite real file paths.
-> Updated: 2026-04-15
+> Updated: 2026-05-05
 
 ---
 
@@ -9,17 +9,22 @@
 
 ```python
 from src.config import load_config, AppConfig, PortalConfig
-from src.auth.graph_auth import GraphAuth
+from src.auth.graph_auth import GraphAuth, AuthRequiredError
 from src.graph.client import GraphClient
 from src.mail.reader import MailReader, MailMessage, MailFolder
 from src.mail.downloader import AttachmentDownloader, AttachmentInfo
-from src.portal.url_extractor import extract_first_portal_url, extract_portal_urls
+from src.portal.url_extractor import (
+    extract_first_portal_url,
+    extract_portal_urls,
+    extract_portal_access_code,
+)
 from src.portal.browser_downloader import BrowserDownloader, PortalDownloadResult
 from src.parser.rules import parse_document, ParsedDocument, CLASSIFICATION_RULES
 from src.excel.writer import ExcelWriter, ExcelLockedError, DATA_COLUMNS, META_COLUMNS
 from src.dedup.manager import DedupManager, DedupRecord
 from src.folder.routing import get_daily_folder, get_date_folder_name, get_tool_export_folder
-from src.processor.email_processor import EmailProcessor, ProcessResult, ScanCancelledError, AuthRequiredError
+from src.processor.email_processor import EmailProcessor, ProcessResult, ScanCancelledError
+from src.web.server import create_app
 ```
 
 *Inside `src/` package — use relative imports:* `from ..config import load_config`
@@ -33,30 +38,22 @@ from src.processor.email_processor import EmailProcessor, ProcessResult, ScanCan
 **File:** `src/parser/rules.py`
 
 **Steps:**
-1. Identify the unique Vietnamese phrase(s) that appear in this document type (use the email body or PDF text).
-2. Append a tuple to `CLASSIFICATION_RULES` **at the right position** (first-match-wins, read comments on ordering).
+1. Identify the unique Vietnamese phrase(s) that appear in this document type.
+2. Append a tuple to `CLASSIFICATION_RULES` **at the right position** (first-match-wins).
 
 ```python
-# In src/parser/rules.py — CLASSIFICATION_RULES list:
 CLASSIFICATION_RULES: List[tuple] = [
     ("Dự định từ chối",            ["dự định từ chối"]),
     ("Từ chối hủy bỏ HLC",         ["từ chối", "hủy bỏ hiệu lực"]),
     # ... existing rules ...
-    ("Thông báo chấp nhận đơn",    ["chấp nhận đơn", "hợp lệ"]),  # ← NEW
+    ("Thông báo chấp nhận đơn",    ["chấp nhận đơn", "hợp lệ"]),
 ]
 ```
 
 **⚠ Pitfalls:**
-- All phrases in a tuple must ALL be present (AND logic, not OR).
-- The first matching rule wins — put more specific rules BEFORE general ones.
-- "Từ chối hủy bỏ HLC" MUST stay before "Cấp toàn bộ" — both phrases can co-exist in a rejection doc.
-
-**Test:** Add a test case to `tests/test_parser.py`:
-```python
-def test_new_classification():
-    parsed = parse_document("... chấp nhận đơn ... hợp lệ ...")
-    assert parsed.loai_cong_van == "Thông báo chấp nhận đơn"
-```
+- All phrases in a tuple must all be present.
+- The first matching rule wins.
+- Always rerun `tests/test_parser.py`.
 
 ---
 
@@ -64,47 +61,34 @@ def test_new_classification():
 
 **When:** Need to capture a new field in the Excel output.
 
-**Steps:**
-
-**Step 1** — Add to `DATA_COLUMNS` in `src/excel/writer.py`:
+**Step 1** — Append to `DATA_COLUMNS` in `src/excel/writer.py`:
 ```python
 DATA_COLUMNS: List[str] = [
     # ... existing columns ...
-    "Tên cột mới",   # ← append at the end (never reorder; "Lỗi" must stay last)
+    "Tên cột mới",   # append only; do not reorder existing columns
 ]
 ```
 
-**Step 2** — Add field to `ParsedDocument` in `src/parser/rules.py` (if it's a parsed field):
+**Step 2** — Add a matching display header if needed:
 ```python
-@dataclass
-class ParsedDocument:
-    # ... existing fields ...
-    new_field: Optional[str] = None
+DATA_COLUMN_HEADERS: List[str] = [
+    # ... existing headers ...
+    "Tên cột mới",
+]
 ```
 
-**Step 3** — Extract the field (add regex + extraction function in `src/parser/rules.py`):
-```python
-_RE_NEW_FIELD = re.compile(r"pattern here", re.UNICODE)
-
-def extract_new_field(text: str) -> Optional[str]:
-    m = _RE_NEW_FIELD.search(text)
-    return m.group(1).strip() if m else None
-
-# Inside parse_document():
-result.new_field = extract_new_field(combined)
-```
-
-**Step 4** — Add to row dict in `src/processor/email_processor.py:_write_results()`:
+**Step 3** — Populate it in `_write_results()`:
 ```python
 row = {
-    # ... existing fields ...
+    "Ngày nhận công văn": seq,
+    "Số công văn": parsed.so_cong_van_num or "",
     "Tên cột mới": parsed.new_field or "",
 }
 ```
 
 **⚠ Pitfalls:**
-- Never reorder `DATA_COLUMNS` — existing Excel files will have columns in the old order.
-- The `ExcelWriter.append_data_row()` uses `header_map` lookup — backward-compatible.
+- `ExcelWriter.append_data_row()` writes by `DATA_COLUMNS` key order, not by a header map.
+- Keep `"Lỗi"` as the last business column unless you intentionally redesign the workbook.
 
 ---
 
@@ -120,40 +104,25 @@ row = {
     "url_patterns": [
       "ipvietnam.gov.vn",
       "dichvucong.ipvietnam",
-      "newportal.gov.vn"   ← add here
+      "newportal.gov.vn"
     ]
   }
 }
 ```
 
-No code changes needed. Patterns are loaded via `PortalConfig.url_patterns` in `src/config.py`.
-
-**To also support a new download button selector:**
-```json
-{
-  "portal": {
-    "download_button_selectors": [
-      "button:has-text('Tải tất cả')",
-      "button:has-text('Download All')"   ← add here
-    ]
-  }
-}
-```
+No code changes needed. Patterns are loaded through `PortalConfig.url_patterns` in `src/config.py`.
 
 ---
 
 ## Pattern 4 — Run the Full Pipeline Programmatically (No GUI)
 
-**When:** Writing a script, test, or new headless workflow.
-
 ```python
-from pathlib import Path
 from datetime import datetime
 from src.config import load_config
-from src.auth.graph_auth import GraphAuth
+from src.auth.graph_auth import GraphAuth, AuthRequiredError
 from src.processor.email_processor import EmailProcessor
 
-cfg = load_config(Path("config.json"))
+cfg = load_config()
 auth = GraphAuth(
     client_id=cfg.azure.client_id,
     authority=cfg.azure.authority,
@@ -161,22 +130,19 @@ auth = GraphAuth(
 )
 
 if not auth.is_authenticated():
-    print("Chạy GUI trước để đăng nhập.")
-    exit(1)
-
-from src.auth.graph_auth import AuthRequiredError
+    raise SystemExit("Chạy GUI trước để đăng nhập.")
 
 processor = EmailProcessor(cfg, auth)
 try:
     result = processor.run(
         progress=lambda c, t, m, s=None: print(f"[{c}/{t}] {m}"),
-        date_from=datetime(2026, 4, 14),
+        date_from=datetime(2026, 4, 14, 0, 0),
         date_to=datetime(2026, 4, 14, 23, 59),
-        output_folder_override=None,   # uses config root_folder
+        output_folder_override=None,
     )
 except AuthRequiredError:
-    print("Token revoked or account blocked — re-authenticate via GUI.")
-    exit(1)
+    raise SystemExit("Token revoked or account blocked — re-authenticate via GUI.")
+
 print(result.summary())
 ```
 
@@ -184,29 +150,24 @@ print(result.summary())
 
 ## Pattern 5 — Parse a Single Document (Unit Test / Debug)
 
-**When:** Debugging parsing failures or writing tests.
-
 ```python
 from pathlib import Path
 from src.parser.rules import parse_document
 
-# From email body text only
 parsed = parse_document(text="""
-    Hà Nội, ngày 13 tháng 04 năm 2026
-    Số: 53397/SHTT-NH.IP
-    Về việc: Kết quả thẩm định nội dung đơn đăng ký nhãn hiệu
-    Số đơn: 4-2025-20619
-    Trong thời hạn 02 tháng kể từ ngày ra thông báo này
+Hà Nội, ngày 13 tháng 04 năm 2026
+Số: 53397/SHTT-NH.IP
+Về việc: Kết quả thẩm định nội dung đơn đăng ký nhãn hiệu
+Số đơn: 4-2025-20619
+Trong thời hạn 02 tháng kể từ ngày ra thông báo này
 """)
-print(parsed.so_cong_van)      # "53397/SHTT-NH.IP"
-print(parsed.so_don)           # "4-2025-20619"
-print(parsed.loai_cong_van)    # "KQTĐ nội dung"
-print(parsed.deadline_months)  # 2
-print(parsed.deadline_date)    # date(2026, 6, 13)
+print(parsed.so_cong_van)
+print(parsed.so_don)
+print(parsed.loai_cong_van)
+print(parsed.deadline_date)
 
-# From PDF file
 parsed_with_pdf = parse_document(
-    text=email_body_preview,
+    text="Trích đoạn bodyPreview",
     pdf_path=Path("tests/fixtures/sample.pdf"),
 )
 ```
@@ -214,8 +175,6 @@ parsed_with_pdf = parse_document(
 ---
 
 ## Pattern 6 — Check and Register Deduplication
-
-**When:** Processing any new email in the pipeline.
 
 ```python
 from pathlib import Path
@@ -226,29 +185,17 @@ daily_folder = Path("~/Desktop/CongVanExport/26.04.14").expanduser()
 folder_name = get_date_folder_name(msg.received_datetime, "%y.%m.%d")
 dedup = DedupManager(daily_folder)
 
-# Pre-check (before acquiring files — tech key only)
 is_dup, reason = dedup.is_duplicate(
     message_id=msg.id,
     internet_message_id=msg.internet_message_id,
     date_folder=folder_name,
-    # so_don=None,  attachment_filenames=None  ← not yet known
 )
 if is_dup:
     print(f"Skipping duplicate: {reason}")
-    return
+    raise SystemExit
 
-# ... acquire files, parse ...
+# ... acquire files + parse ...
 
-# Full check (after parsing — business keys available)
-is_dup, reason = dedup.is_duplicate(
-    message_id=msg.id,
-    internet_message_id=msg.internet_message_id,
-    date_folder=folder_name,
-    so_don=parsed.so_don,
-    attachment_filenames=["1-thongbao.pdf"],
-)
-
-# After successful Excel write:
 dedup.register(
     message_id=msg.id,
     internet_message_id=msg.internet_message_id,
@@ -261,57 +208,71 @@ dedup.register(
 
 ---
 
-## Pattern 7 — Write to Excel (Safe Write with Lock Handling)
-
-**When:** Adding a new row to the Excel file.
+## Pattern 7 — Write to Excel (Current Workbook Layout)
 
 ```python
-from src.excel.writer import ExcelWriter, ExcelLockedError
+from datetime import datetime
 from pathlib import Path
+from src.excel.writer import ExcelWriter, ExcelLockedError
 
 daily_folder = Path("~/Desktop/CongVanExport/26.04.14").expanduser()
 writer = ExcelWriter(daily_folder, "SO CONG VAN DEN-LIENDO.xlsx")
-seq = writer.next_sequence_number()   # reads existing file, returns next STT
+seq = writer.next_sequence_number()
+
+if seq == 1:
+    writer.append_date_row("14/04/2026")
 
 row = {
-    "STT":                  seq,
-    "Ngày nhận mail":       "2026-04-14",
-    "Tên mail (Subject)":   "Thông báo kết quả thẩm định",
-    "Người gửi":            "IPVN <ipvn@example.com>",
-    "Tên attachment":       "1-thongbao.pdf",
-    "Số công văn":          "53397/SHTT-NH.IP",
-    "Loại công văn":        "KQTĐ nội dung",
-    # ... all 17 DATA_COLUMNS fields
+    "Ngày nhận công văn": seq,
+    "Số công văn": parsed.so_cong_van_num or "",
+    "Ngày issue công văn": parsed.issue_date.strftime("%m/%d/%Y") if parsed.issue_date else "",
+    "Deadline trả lời Cục": parsed.deadline_date.strftime("%m/%d/%Y") if parsed.deadline_date else "",
+    "Nội dung công văn": parsed.nhan_hieu or "",
 }
+
+missing = []
+if not parsed.so_cong_van_num:
+    missing.append("Thiếu số công văn")
+if not parsed.issue_date:
+    missing.append("Thiếu ngày issue công văn")
+if not parsed.deadline_date:
+    missing.append("Thiếu deadline")
+if not parsed.nhan_hieu:
+    missing.append("Thiếu nhãn hiệu")
+if missing:
+    row["Lỗi"] = "\n".join(f"{i}: {e}" for i, e in enumerate(missing, start=1))
 
 for attempt in range(2):
     try:
-        writer.append_data_row(row)
-        writer.append_meta_row({"message_id": msg.id, ...})
+        writer.append_data_row(row, highlight_red=bool(missing))
+        writer.append_meta_row({
+            "message_id": msg.id,
+            "internet_message_id": msg.internet_message_id or "",
+            "date_folder": "26.04.14",
+            "so_don": parsed.so_don or "",
+            "attachment_filenames": "; ".join(att_filenames),
+            "processed_at": datetime.now().isoformat(timespec="seconds"),
+            "run_status": status,
+        })
         break
     except ExcelLockedError as exc:
         if attempt == 0:
-            print(f"Excel is open: {exc.excel_path}. Please close it.")
-            input("Press Enter after closing Excel...")
+            print(f"Close Excel and retry: {exc.excel_path}")
         else:
             raise
 ```
+
+**Note:** The current workbook layout leaves many legacy business columns blank; `_write_results()` only fills the fields shown above plus `Lỗi` when validation fails.
 
 ---
 
 ## Pattern 8 — Add a GUI Dialog (tkinter, Thread-Safe)
 
-**When:** Need to show a dialog from the worker thread during processing.
-
 ```python
-# In CongVanApp class (src/gui/app.py):
+import threading
+import tkinter as tk
+
 def _ask_user_something(self, param: str) -> bool:
-    """
-    Called from scan worker thread. Shows dialog on main thread.
-    Returns True/False based on user choice.
-    BLOCKS worker thread until user responds.
-    """
-    import threading
     event = threading.Event()
     result = [False]
 
@@ -336,54 +297,42 @@ def _ask_user_something(self, param: str) -> bool:
         tk.Button(dlg, text="Yes", command=_yes).pack(side=tk.LEFT, padx=10, pady=10)
         tk.Button(dlg, text="No", command=_no).pack(side=tk.LEFT, padx=10, pady=10)
 
-    self.after(0, _show)    # schedule on main thread
-    event.wait()            # block worker thread
+    self.after(0, _show)
+    event.wait()
     return result[0]
 ```
 
-**⚠ Pitfall:** Never call `tk.Toplevel()` directly from a worker thread — always use `self.after(0, ...)`.
+**⚠ Pitfall:** Never call `tk.Toplevel()` directly from a worker thread.
 
 ---
 
 ## Pattern 9 — Run Tests
 
 ```bash
-# All tests
 python -m pytest tests/ -v
-
-# Single file
 python -m pytest tests/test_parser.py -v
-
-# Specific test
-python -m pytest tests/test_parser.py::test_so_cong_van_extraction -v
-
-# With output visible
-python -m pytest tests/ -v -s
+python -m pytest tests/test_portal_extractor.py -v
+python -m pytest tests/test_file_naming.py -v
 ```
 
 ---
 
 ## Pattern 10 — Add a New Config Key
 
-**When:** Adding a new configurable behavior.
-
-**Step 1** — Add field to the appropriate dataclass in `src/config.py`:
 ```python
+from dataclasses import dataclass
+
 @dataclass
 class PortalConfig:
-    # ... existing fields ...
-    my_new_setting: bool = False   # ← with sensible default
+    my_new_setting: bool = False
 ```
 
-**Step 2** — Read from JSON in `load_config()`:
 ```python
 portal = PortalConfig(
-    # ... existing fields ...
     my_new_setting=bool(portal_raw.get("my_new_setting", False)),
 )
 ```
 
-**Step 3** — Add to `config.json` (optional — default handles missing key):
 ```json
 {
   "portal": {
@@ -394,29 +343,27 @@ portal = PortalConfig(
 
 ---
 
-## Pattern 11 — Extract Portal URL from Email Body
-
-**When:** Need to test URL extraction logic or process custom email content.
+## Pattern 11 — Extract Portal URL and Access Code
 
 ```python
-from src.portal.url_extractor import extract_portal_urls, extract_first_portal_url
+from src.portal.url_extractor import (
+    extract_portal_urls,
+    extract_first_portal_url,
+    extract_portal_access_code,
+)
 
-body_html = '<a href="https://dichvucong.ipvietnam.gov.vn/tra-cuu?so=53397">Xem hồ sơ</a>'
-body_text = "Xem tại https://dichvucong.ipvietnam.gov.vn/tra-cuu?so=53397"
+body_html = '<a href="https://dichvucong.ipvietnam.gov.vn/tra-cuu?so=53397&amp;x=1">Xem hồ sơ</a>'
+body_text = "Nhập mã eaf68de2849446a481472877dc83486a nếu trang yêu cầu"
 url_patterns = ["ipvietnam.gov.vn", "dichvucong.ipvietnam"]
 
-# Get all portal URLs (deduplicated)
 all_urls = extract_portal_urls(body_html, body_text, url_patterns)
-
-# Get first one only (used by processor)
 first_url = extract_first_portal_url(body_html, body_text, url_patterns)
+access_code = extract_portal_access_code(body_text, body_html)
 ```
 
 ---
 
 ## Pattern 12 — Download Files from Portal (Browser Automation)
-
-**When:** Manually triggering a portal download outside the main pipeline.
 
 ```python
 from pathlib import Path
@@ -427,23 +374,32 @@ downloader = BrowserDownloader(
         "button:has-text('Tải tất cả')",
         "a:has-text('Tải tất cả')",
     ],
-    page_load_timeout_ms=15000,
+    page_load_timeout_ms=30000,
     wait_after_click_ms=8000,
-    headless=False,   # False = show browser window for debugging
+    headless=False,
 )
-# Strategy 1 (bulk button) is tried first; strategy 2 (individual .file-item__title links) is the fallback.
-# Only the caller should add notes to result.notes — do not add notes inside strategy methods.
 
 result = downloader.download(
     portal_url="https://dichvucong.ipvietnam.gov.vn/tra-cuu?so=53397",
-    target_folder=Path(r"C:\temp\downloads"),
+    target_folder=Path.home() / "Downloads" / "cong-van-debug",
+    access_code="eaf68de2849446a481472877dc83486a",
 )
 
 if result.success:
     for path in result.downloaded_paths:
-        print(f"Downloaded: {path}")
+        print(path)
 else:
-    print("Failed:", result.notes)
+    print(result.notes)
 ```
 
-**⚠ Debug tip:** Set `headless=False` to see the browser and diagnose button selector failures.
+---
+
+## Pattern 13 — Create the Local FastAPI App (Source-Only)
+
+```python
+from src.web.server import create_app
+
+app = create_app(port=8080)
+```
+
+**Current reality:** `create_app()` is implemented, but `run_web.py` is still a placeholder. If you activate this path, document the launcher and test the auth callback flow.
