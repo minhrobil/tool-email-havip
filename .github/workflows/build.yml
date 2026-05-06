@@ -64,11 +64,14 @@ jobs:
           copy packaging\windows\run_headless.dist.bat dist\ToolXuLyMailCongVan\run_headless.bat
           copy packaging\windows\setup_scheduler.dist.bat dist\ToolXuLyMailCongVan\setup_scheduler.bat
 
+      - name: Zip dist folder
+        run: Compress-Archive -Path dist\ToolXuLyMailCongVan\* -DestinationPath ToolXuLyMailCongVan-windows.zip
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ToolXuLyMailCongVan-windows
-          path: dist\ToolXuLyMailCongVan\
+          path: ToolXuLyMailCongVan-windows.zip
           retention-days: 30
 
       - name: Create GitHub Release
@@ -76,6 +79,5 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: Build ${{ github.run_number }}
-          files: |
-            dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe
+          files: ToolXuLyMailCongVan-windows.zip
           generate_release_notes: true
