@@ -57,6 +57,7 @@ class ParsedDocument:
     loai_hinh_don: Optional[str] = None
     noi_dung_cong_van: Optional[str] = None
     nhan_hieu: Optional[str] = None          # text after "Nhãn hiệu:" until end of line
+    is_scan: bool = False                    # True when text was obtained via OCR (scanned PDF)
     raw_text_snippet: str = ""           # first 2000 chars for debugging
     parse_errors: List[str] = field(default_factory=list)
 
@@ -79,14 +80,22 @@ def normalize_text(text: str) -> str:
 # [Ss] covers both "Số:" (official document header) and "số" (inline in email body).
 # Colon/dash is optional to handle both "Số: 41049/..." and "số 41049/..." formats.
 _RE_SO_CONG_VAN = re.compile(
-    r"[Ss][oố]\s*[:\-]?\s*(\d{3,6}/[A-ZĐÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴ"
+    # "Số: 72820/SHTT-SC.IP"  — OCR may garble "Số:" to "Sô%", "Só#", "sá:", etc.
+    # Label charset: oôố (normal) + ó (U+00F3) + á (U+00E1) for OCR noise variants.
+    # Separator: exclude Ø (U+00D8) so it is captured as part of the number, not skipped.
+    # Number: allow leading Ø (U+00D8) as OCR noise for digit '2' (e.g. "Ø3788" = "23788").
+    # Separator after number: allow ) in addition to / (OCR often confuses / and ));
+    # also allow no separator when digits run directly into uppercase suffix.
+    r"[Ss][oôốóá][^\dØ\n]{0,8}"
+    r"([Ø\d]{3,6}(?:[/\)]\s*)?[A-ZĐÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴ"
     r"a-z0-9\-\.]+)",
     re.UNICODE,
 )
 
 # "Hà Nội, ngày 13 tháng 04 năm 2026"
+# OCR noise: rotated-scan PDFs sometimes give "0gày" instead of "Ngày"
 _RE_ISSUE_DATE = re.compile(
-    r"ng[àa]y\s+(\d{1,2})\s+th[áa]ng\s+(\d{1,2})\s+n[ăa]m\s+(\d{4})",
+    r"(?:[Nn]|0)g[àa]y\s+(\d{1,2})\s+th[áa]ng\s+(\d{1,2})\s+n[ăa]m\s+(\d{4})",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -94,7 +103,12 @@ _RE_ISSUE_DATE = re.compile(
 # Separator [:\-] is optional so we also catch inline mentions without punctuation.
 # The capture group \d+-\d+-\d+ naturally excludes "ĐN1-2017-00311" (ĐN prefix ≠ digit).
 _RE_SO_DON = re.compile(
-    r"[Ss][oố]\s+đ[ơo]n\s*[:\-]?\s*(\d+-\d+-\d+)",
+    # Standard: "Số đơn: 4-2025-20619"  or  OCR "Sốđơn1-2022-08586" (no space/colon)
+    # Letter-prefix: "Số đơn: DT1-2025-14774" (maintenance/duy-trì type)
+    # OCR noise: "sá đơn:" (sá for Số), "ØT1-..." (Ø for D in DT prefix)
+    # [^\w\n]{0,5}   = separator, no line crossing
+    # [^\s\dĐđ]{0,2} = 0-2 char optional prefix (allows DT/ØT); excludes Đ/đ so ĐN1-format is blocked
+    r"[Ss][oốáa][\s]*đ[ơo]n[^\w\n]{0,5}([^\s\dĐđ]{0,2}\d+-\d+-\d+)",
     re.UNICODE,
 )
 
@@ -116,9 +130,28 @@ _RE_DEADLINE_DAYS = re.compile(
     re.UNICODE,
 )
 
-# "Nhãn hiệu: SKYLINE" — text after "Nhãn hiệu:" until end of line
+# "Nhãn hiệu: SKYLINE" — OCR may use { or space instead of colon
+# [^\w\n]{0,5} prevents crossing to next line; [^\n]+ captures rest of same line
 _RE_NHAN_HIEU = re.compile(
-    r"Nhãn hiệu\s*:\s*(.+)",
+    r"Nh[ãa]n hi[eệ]u[^\w\n]{0,5}([^\n]+)",
+    re.UNICODE,
+)
+
+# "Tên sáng chế: Quạt trần" — OCR may give "ché" for "chế" and "{" for ":"
+_RE_TEN_SANG_CHE = re.compile(
+    r"T[êe]n s[áa]ng ch[^\s]{1,2}[^\w\n]{0,5}([^\n]+)",
+    re.UNICODE,
+)
+
+# "Tên giải pháp hữu ích: BỘ GIẢM XÓC" — OCR-robust separator
+_RE_TEN_GPHI = re.compile(
+    r"T[êe]n gi[ảa]i ph[áa]p h[ữu][uư] [íiì]ch[^\w\n]{0,5}([^\n]+)",
+    re.UNICODE,
+)
+
+# "Tên kiểu dáng công nghiệp: Bàn cờ caro" — OCR-robust separator
+_RE_TEN_KIEU_DANG = re.compile(
+    r"T[êe]n ki[eể][uư] d[áa]ng c[oô]ng ngh[iệ][eệ]p[^\w\n]{0,5}([^\n]+)",
     re.UNICODE,
 )
 
@@ -161,6 +194,10 @@ CLASSIFICATION_RULES: List[tuple] = [
     ("TBND/QĐTC", ["Về việc từ chối cấp Bằng độc quyền sáng chế"]),
     ("TBND/QĐTC", ["Về việc từ chối cấp Bằng độc quyền giải pháp hữu ích"]),
     ("TBND/QĐTC", ["Về việc từ chối bảo hộ kiểu dáng công nghiệp đăng ký quốc tế tại Việt Nam"]),
+    # Contract registration rejection (scan PDFs — body text only, no subject line captured)
+    # Both phrases appear in file 14 OCR body text (multi-phrase: ALL must match).
+    # "chối đăng ký" is in the rejection sentence; "hợp đồng" is in the document body.
+    ("TBND/QĐTC", ["chối đăng ký", "hợp đồng"]),
 
     # ── TĐHT/DL2M: thẩm định hình thức, deadline 2 tháng ─────────────────────
     # Source: Mapping.docx phrases 13-14
@@ -181,6 +218,12 @@ CLASSIFICATION_RULES: List[tuple] = [
     ("TB0DL", ["Chấp nhận yêu cầu sửa đổi, bổ sung đơn"]),
     ("TB0DL", ["Ghi nhận thay đổi người nộp đơn"]),
     ("TB0DL", ["Về việc thụ lý giải quyết khiếu nại lần đầu"]),
+    # Fallback phrases for scan PDFs where subject line is not captured by OCR.
+    # These are shorter substrings of existing rules above, matched from document body.
+    # Multi-phrase entries: ALL phrases must appear (order-independent).
+    ("TB0DL", ["Gia hạn hiệu lực", "nhãn hiệu"]),                         # file 17 scan (OCR has "04" between words)
+    ("TB0DL", ["duy trì hiệu lực Bằng độc quyền sáng chế"]),              # file 18 scan
+    ("TB0DL", ["duy trì hiệu lực Bằng độc quyền giải pháp hữu ích"]),     # file 19 scan
 ]
 
 # Application type detection rules
@@ -204,7 +247,23 @@ _SKIP_PATTERNS = re.compile(
 
 def extract_so_cong_van(text: str) -> Optional[str]:
     m = _RE_SO_CONG_VAN.search(text)
-    return m.group(1).strip() if m else None
+    if not m:
+        return None
+    val = m.group(1).strip()
+    # Clean OCR artifacts introduced by _RE_SO_CONG_VAN's looser patterns:
+    #   Ø at start of number = OCR noise for digit '2' (e.g. "Ø3788" → "23788")
+    val = re.sub(r"^Ø(\d{2,})", r"2\1", val)
+    #   No separator between digits and uppercase suffix → insert "/"
+    #   e.g. "22868SHTT-SCVB" → "22868/SHTT-SCVB"
+    val = re.sub(r"(\d{3,6})(?=[A-ZĐ])", r"\1/", val)
+    #   ')' used as separator instead of '/' (OCR confusion) → fix
+    val = val.replace(")", "/")
+    #   Trailing period + lowercase letters = OCR noise from adjacent word
+    #   e.g. "SHTT.v" → "SHTT" (but preserve ".IP" or other uppercase suffixes)
+    val = re.sub(r"\.[a-z]+$", "", val)
+    #   Trailing isolated period = OCR noise
+    val = re.sub(r"\.$", "", val)
+    return val
 
 
 def extract_issue_date(text: str) -> Optional[date]:
@@ -230,9 +289,20 @@ def extract_so_yeu_cau(text: str) -> Optional[str]:
 
 
 def extract_nhan_hieu(text: str) -> Optional[str]:
-    """Extract trademark name: text after 'Nhãn hiệu:' until end of line."""
-    m = _RE_NHAN_HIEU.search(text)
-    return m.group(1).strip() if m else None
+    """Extract product/trademark name from the document.
+
+    Tries each field label in priority order:
+      - Nhãn hiệu: X
+      - Tên sáng chế: X
+      - Tên giải pháp hữu ích: X
+      - Tên kiểu dáng công nghiệp: X
+    Returns the first match, stripped of whitespace.
+    """
+    for pattern in (_RE_NHAN_HIEU, _RE_TEN_SANG_CHE, _RE_TEN_GPHI, _RE_TEN_KIEU_DANG):
+        m = pattern.search(text)
+        if m:
+            return m.group(1).strip()
+    return None
 
 
 def extract_so_gcn(text: str) -> Optional[str]:
@@ -273,14 +343,28 @@ def calculate_deadline_date(
     return issue_date + relativedelta(months=deadline_months)
 
 
+def _norm_for_match(s: str) -> str:
+    """Lowercase + strip all punctuation/special chars + collapse whitespace.
+    Keeps Unicode letters (including Vietnamese diacritics) and digits.
+    This makes matching robust against PDF extraction artifacts like extra
+    commas, slashes, or other punctuation variations.
+    """
+    s = s.lower()
+    s = re.sub(r"[^\w\s]", "", s, flags=re.UNICODE)  # keep letters/digits/spaces
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
 def classify_document(text: str) -> Optional[str]:
     """
     Return the label of the first matching CLASSIFICATION_RULE, or None.
-    All phrases in a rule must be present (case-insensitive) for a match.
+    All phrases in a rule must be present for a match.
+    Matching is case-insensitive and ignores commas/semicolons (PDF extraction
+    sometimes inserts or omits punctuation without changing the meaning).
     """
-    text_lower = text.lower()
+    text_norm = _norm_for_match(text)
     for label, phrases in CLASSIFICATION_RULES:
-        if all(p.lower() in text_lower for p in phrases):
+        if all(_norm_for_match(p) in text_norm for p in phrases):
             return label
     return None
 
@@ -318,9 +402,95 @@ def extract_noi_dung(text: str) -> Optional[str]:
 
 # ── PDF text extraction ────────────────────────────────────────────────────
 
+_SIG_BLOCK_RE = re.compile(
+    r"(Ký bởi|Cơ quan|Bộ Khoa học|Ngày ký|Giờ ký|Cục Sở hữu trí tuệ)[^\n]*",
+    re.IGNORECASE,
+)
+
+
+def _is_scan_pdf(text: str) -> bool:
+    """Return True if extracted text is only the digital-signature block (image-based PDF)."""
+    stripped = _SIG_BLOCK_RE.sub("", text).strip()
+    return len(stripped) < 50
+
+
+def _is_scan_pdf_file(pdf_path: Path) -> bool:
+    """Return True if pdf_path is an image-based (scanned) PDF requiring OCR.
+
+    Opens the file with PyMuPDF's native text extractor (no OCR) and checks
+    whether the resulting text is essentially empty (only the digital-signature
+    block). This is used to set ParsedDocument.is_scan without running OCR twice.
+    """
+    try:
+        import fitz
+        doc = fitz.open(str(pdf_path))
+        pages = [page.get_text("text") for page in doc]
+        doc.close()
+        return _is_scan_pdf(normalize_text("\n".join(pages)))
+    except Exception:
+        return False
+
+
+def _extract_text_ocr(pdf_path: Path) -> str:
+    """OCR fallback for image-based PDFs.
+
+    Renders each page to a correctly-oriented PNG (applying any stored page rotation)
+    and calls Tesseract directly via subprocess. This is necessary because PyMuPDF's
+    get_textpage_ocr() returns text in PDF coordinates which are rotated for scanned
+    documents (rotation=270 is common for Vietnamese IP office docs).
+
+    Requirements (system-level, not Python packages):
+      - macOS:   brew install tesseract tesseract-lang
+      - Windows: winget install UB-Mannheim.TesseractOCR
+                 then download vie.traineddata to Tesseract's tessdata folder
+                 https://github.com/tesseract-ocr/tessdata_best
+    """
+    import os
+    import subprocess
+    import tempfile
+
+    try:
+        import fitz
+        doc = fitz.open(str(pdf_path))
+        texts: List[str] = []
+        for page in doc:
+            try:
+                if page.rotation != 0:
+                    # Rotated pages (e.g. rotation=270): render to upright PNG first so
+                    # Tesseract reads in the correct visual order.  get_textpage_ocr()
+                    # would OCR an upright image but then map text back to the rotated
+                    # PDF coordinate system, causing the header area to be missed.
+                    pix = page.get_pixmap(dpi=300)  # applies page.rotation automatically
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                        tmp_path = f.name
+                    pix.save(tmp_path)
+                    try:
+                        proc = subprocess.run(
+                            ["tesseract", tmp_path, "stdout", "-l", "vie"],
+                            capture_output=True, text=True, encoding="utf-8", timeout=60,
+                        )
+                        texts.append(proc.stdout)
+                    finally:
+                        os.unlink(tmp_path)
+                else:
+                    # Non-rotated pages: built-in OCR is fine.
+                    tp = page.get_textpage_ocr(language="vie", dpi=300, full=True)
+                    texts.append(page.get_text(textpage=tp))
+            except Exception as page_exc:
+                logger.debug("OCR page %d of %s failed: %s", page.number, pdf_path.name, page_exc)
+        doc.close()
+        result = normalize_text("\n".join(texts))
+        logger.info("OCR extracted %d chars from %s", len(result), pdf_path.name)
+        return result
+    except Exception as exc:
+        logger.warning("OCR failed for %s: %s — install Tesseract + vie language pack", pdf_path.name, exc)
+        return ""
+
+
 def extract_text_from_pdf(pdf_path: Path) -> str:
     """
     Extract all text from a PDF file using PyMuPDF (fitz).
+    For image-based (scanned) PDFs, falls back to Tesseract OCR automatically.
     Returns empty string if extraction fails or library is missing.
     """
     try:
@@ -335,7 +505,11 @@ def extract_text_from_pdf(pdf_path: Path) -> str:
         doc = fitz.open(str(pdf_path))
         pages: List[str] = [page.get_text("text") for page in doc]
         doc.close()
-        return normalize_text("\n".join(pages))
+        text = normalize_text("\n".join(pages))
+        if _is_scan_pdf(text):
+            logger.info("Scan PDF detected (%s), falling back to OCR …", pdf_path.name)
+            return _extract_text_ocr(pdf_path)
+        return text
     except Exception as exc:
         logger.warning("PDF text extraction failed for %s: %s", pdf_path, exc)
         return ""
@@ -358,12 +532,14 @@ def parse_document(
     """
     combined = normalize_text(text or "")
 
+    is_scan = False
     if pdf_path is not None:
+        is_scan = _is_scan_pdf_file(pdf_path)
         pdf_text = extract_text_from_pdf(pdf_path)
         if pdf_text:
             combined = normalize_text(combined + "\n" + pdf_text)
 
-    result = ParsedDocument(raw_text_snippet=combined[:2000])
+    result = ParsedDocument(raw_text_snippet=combined[:2000], is_scan=is_scan)
 
     result.so_cong_van    = extract_so_cong_van(combined)
     # Derive the numeric-only portion (e.g. "30369" from "30369/TB-SHTT.IP")

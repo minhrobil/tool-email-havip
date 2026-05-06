@@ -487,8 +487,12 @@ class EmailProcessor:
         row = {
             "Ngày nhận công văn":  seq,
             "Số công văn":         parsed.so_cong_van_num or "",
-            "Ngày issue công văn": _fmt_mdY(parsed.issue_date),
-            "Deadline trả lời Cục": _fmt_mdY(parsed.deadline_date),
+            "Loại công văn":       parsed.loai_cong_van or "",
+            "Ngày issue công văn": parsed.issue_date,        # date object — EDATE formula requires this
+            "Số tháng deadline":   parsed.deadline_months,   # col E; formula in col F uses =EDATE(D,E)
+            # "Deadline trả lời Cục" intentionally omitted — master file has =IFERROR(EDATE(D,E),"0DL")
+            "Số đơn":              parsed.so_don or "",
+            "Loại hình đơn":       "",
             "Nội dung công văn":   parsed.nhan_hieu or "",
         }
 
@@ -498,10 +502,10 @@ class EmailProcessor:
             missing.append("Thiếu số công văn")
         if not parsed.issue_date:
             missing.append("Thiếu ngày issue công văn")
-        if not parsed.deadline_date:
-            missing.append("Thiếu deadline")
-        if not parsed.nhan_hieu:
-            missing.append("Thiếu nhãn hiệu")
+        if parsed.deadline_months is None and parsed.loai_cong_van not in ("TB0DL", "CNĐ"):
+            missing.append("Thiếu số tháng deadline")
+        if not parsed.loai_cong_van:
+            missing.append("Không khớp rule phân loại")
 
         # Only data-validation failures go into the Excel "Lỗi" column.
         # Technical pipeline notes (portal errors, download failures) stay in logs only.
@@ -509,10 +513,14 @@ class EmailProcessor:
             numbered = "\n".join(f"{i}: {e}" for i, e in enumerate(missing, start=1))
             row["Lỗi"] = numbered
 
+        if parsed.is_scan:
+            existing = row.get("Lỗi", "")
+            row["Lỗi"] = ("File scan, please check again\n" + existing).strip() if existing else "File scan, please check again"
+
         highlight_red = bool(missing)
         if highlight_red and result is not None:
             result.missing_data_count += 1
-        writer.append_data_row(row, highlight_red=highlight_red)
+        writer.append_data_row(row, highlight_red=highlight_red, highlight_yellow=parsed.is_scan)
         writer.append_meta_row({
             "message_id":           msg.id,
             "internet_message_id":  msg.internet_message_id or "",

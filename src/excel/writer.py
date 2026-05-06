@@ -92,7 +92,12 @@ _HEADER_FILL = PatternFill("solid", fgColor="1F4E79")
 _HEADER_FONT = Font(color="FFFFFF", bold=True, name="Calibri", size=10)
 _HEADER_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
 _CELL_ALIGN = Alignment(vertical="top", wrap_text=True)
-_ROW_ERROR_FILL = PatternFill("solid", fgColor="FFCCCC")   # light red — text still readable
+_ROW_ERROR_FILL  = PatternFill("solid", fgColor="FFCCCC")   # light red — data validation errors
+_ROW_SCAN_FILL   = PatternFill("solid", fgColor="FFFF00")   # yellow — scanned PDF, needs review
+
+# Columns that are never auto-populated from PDF parsing (user fills manually).
+# These are hidden in the exported sheet to reduce clutter but can be unhidden in Excel.
+_HIDDEN_COLUMNS: set[str] = set()
 
 
 # ── ExcelWriter ────────────────────────────────────────────────────────────
@@ -103,7 +108,9 @@ class ExcelWriter:
     def __init__(self, daily_folder: Path, excel_filename: str = "SO CONG VAN DEN-LIENDO.xlsx"):
         self.excel_path = daily_folder / excel_filename
 
-    def append_data_row(self, row_data: Dict[str, Any], highlight_red: bool = False) -> None:
+    def append_data_row(self, row_data: Dict[str, Any],
+                        highlight_red: bool = False,
+                        highlight_yellow: bool = False) -> None:
         """Append one row to the DATA sheet.
 
         Uses DATA_COLUMNS key order to map row_data values to columns,
@@ -111,9 +118,10 @@ class ExcelWriter:
         Unknown keys in row_data are silently skipped.
 
         Args:
-            row_data:      Dict mapping DATA_COLUMNS keys to values.
-            highlight_red: If True, apply a light-red fill to the entire row
-                           (used to flag rows with missing required fields).
+            row_data:         Dict mapping DATA_COLUMNS keys to values.
+            highlight_red:    If True, apply a light-red fill (missing required fields).
+            highlight_yellow: If True, apply a yellow fill (scanned PDF — needs review).
+                              Takes lower priority than highlight_red.
         """
         wb = _load_or_create(self.excel_path)
         ws = wb["DATA"]
@@ -123,10 +131,23 @@ class ExcelWriter:
             if value is not None:
                 cell = ws.cell(row=row_idx, column=col_idx, value=_coerce(value))
                 cell.alignment = _CELL_ALIGN
+                # Date objects need an explicit format so Excel renders them as dates (not serials)
+                if isinstance(value, (date, datetime)):
+                    cell.number_format = "MM/DD/YYYY"
+
+        # Always write EDATE formula to col F — relative refs adjust automatically on paste to master
+        _deadline_col = DATA_COLUMNS.index("Deadline trả lời Cục") + 1
+        fcell = ws.cell(row=row_idx, column=_deadline_col,
+                        value=f'=IFERROR(EDATE(D{row_idx},E{row_idx}),"0DL")')
+        fcell.number_format = "MM/DD/YYYY"
+        fcell.alignment = _CELL_ALIGN
+
         if highlight_red:
             for col_idx in range(1, len(DATA_COLUMNS) + 1):
-                cell = ws.cell(row=row_idx, column=col_idx)
-                cell.fill = _ROW_ERROR_FILL
+                ws.cell(row=row_idx, column=col_idx).fill = _ROW_ERROR_FILL
+        elif highlight_yellow:
+            for col_idx in range(1, len(DATA_COLUMNS) + 1):
+                ws.cell(row=row_idx, column=col_idx).fill = _ROW_SCAN_FILL
         self._save(wb)
         logger.debug("DATA row %d written to %s", row_idx, self.excel_path.name)
 
@@ -251,9 +272,10 @@ def _add_sheet(wb: Workbook, name: str, columns: List[str], position: int = None
         cell.fill = _HEADER_FILL
         cell.alignment = _HEADER_ALIGN
         col_letter = get_column_letter(col_idx)
-        ws.column_dimensions[col_letter].width = _COLUMN_WIDTHS.get(
-            col_key, max(len(col_key) + 4, 18)
-        )
+        col_dim = ws.column_dimensions[col_letter]
+        col_dim.width = _COLUMN_WIDTHS.get(col_key, max(len(col_key) + 4, 18))
+        if col_key in _HIDDEN_COLUMNS:
+            col_dim.hidden = True
     ws.freeze_panes = "A2"
 
 
@@ -269,11 +291,7 @@ def _next_empty_row(ws, num_cols: int) -> int:
 
 
 def _coerce(value: Any) -> Any:
-    """Convert date/datetime to displayable string; pass other types through."""
-    if isinstance(value, (date, datetime)):
-        if isinstance(value, datetime):
-            return value.strftime("%d/%m/%Y %H:%M")
-        return value.strftime("%d/%m/%Y")
+    """Pass values through; date/datetime objects are written natively so Excel formulas work."""
     return value
 
 

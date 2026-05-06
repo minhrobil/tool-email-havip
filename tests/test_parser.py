@@ -21,6 +21,7 @@ from src.parser.rules import (
     calculate_deadline_date,
     classify_document,
     detect_loai_hinh_don,
+    extract_nhan_hieu,
     extract_noi_dung,
     parse_document,
 )
@@ -285,8 +286,9 @@ class TestClassifyDocument:
         assert classify_document(text) == "TB0DL"
 
     def test_tb0dl_chap_nhan_sua_doi(self):
-        text = "Chấp nhận yêu cầu sửa đổi, bổ sung đơn số 4-2025-20000"
-        assert classify_document(text) == "TB0DL"
+        # PDF may or may not have comma — both must match
+        assert classify_document("Chấp nhận yêu cầu sửa đổi, bổ sung đơn") == "TB0DL"
+        assert classify_document("Chấp nhận yêu cầu sửa đổi bổ sung đơn") == "TB0DL"
 
     def test_tb0dl_ghi_nhan_thay_doi(self):
         text = "Ghi nhận thay đổi người nộp đơn theo yêu cầu"
@@ -309,8 +311,32 @@ class TestClassifyDocument:
         )
         assert classify_document(text) is None
 
+
+# ── extract_nhan_hieu ─────────────────────────────────────────────────────
 
-# ── detect_loai_hinh_don ──────────────────────────────────────────────────
+class TestExtractNhanHieu:
+    def test_nhan_hieu(self):
+        assert extract_nhan_hieu("Nhãn hiệu: SKYLINE") == "SKYLINE"
+
+    def test_ten_sang_che(self):
+        assert extract_nhan_hieu("Tên sáng chế: Quạt trần") == "Quạt trần"
+
+    def test_ten_gphi(self):
+        assert extract_nhan_hieu("Tên giải pháp hữu ích: BỘ GIẢM XÓC") == "BỘ GIẢM XÓC"
+
+    def test_ten_kieu_dang(self):
+        assert extract_nhan_hieu("Tên kiểu dáng công nghiệp: Bàn cờ caro") == "Bàn cờ caro"
+
+    def test_priority_nhan_hieu_first(self):
+        # "Nhãn hiệu" takes priority over others if both present
+        text = "Nhãn hiệu: LOGO\nTên sáng chế: Thiết bị X"
+        assert extract_nhan_hieu(text) == "LOGO"
+
+    def test_not_found(self):
+        assert extract_nhan_hieu("Không có tên sản phẩm") is None
+
+
+
 
 class TestLoaiHinhDon:
     def test_nhan_hieu(self):

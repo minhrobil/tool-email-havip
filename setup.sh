@@ -93,6 +93,31 @@ echo "[3/5] Installing Python dependencies..."
 "$VENV_PIP" install pytest
 
 echo
+echo "[3.5] Checking Tesseract OCR (required for scanned PDFs)..."
+if ! command -v tesseract &>/dev/null; then
+    echo "  Tesseract not found. Attempting to install via Homebrew..."
+    if command -v brew &>/dev/null; then
+        brew install tesseract tesseract-lang \
+            && echo "  Tesseract + Vietnamese language pack installed: OK" \
+            || echo "  [WARN] Tesseract install failed. OCR for scanned PDFs will be disabled."
+    else
+        echo "  [WARN] Homebrew not found. Install Tesseract manually:"
+        echo "    brew install tesseract tesseract-lang"
+    fi
+else
+    echo "  Tesseract found: OK"
+    # Check Vietnamese language pack
+    if tesseract --list-langs 2>/dev/null | grep -q "^vie$"; then
+        echo "  Vietnamese language pack (vie): OK"
+    else
+        echo "  [WARN] Vietnamese language pack missing. Installing..."
+        brew install tesseract-lang 2>/dev/null \
+            && echo "  Vietnamese language pack installed: OK" \
+            || echo "  [WARN] Run: brew install tesseract-lang"
+    fi
+fi
+
+echo
 echo "[4/5] Installing Playwright Chromium browser..."
 "$VENV_PYTHON" -m playwright install chromium
 

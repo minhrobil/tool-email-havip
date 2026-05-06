@@ -58,6 +58,29 @@ if %errorlevel% neq 0 ( echo ERROR installing dependencies & pause & exit /b 1 )
 call venv\Scripts\pip.exe install pytest
 if %errorlevel% neq 0 ( echo ERROR installing pytest & pause & exit /b 1 )
 
+:: ── Step 3.5: Check Tesseract OCR ─────────────────────────────────────────
+echo.
+echo [3.5] Checking Tesseract OCR (required for scanned PDFs)...
+where tesseract >nul 2>&1
+if %errorlevel% neq 0 (
+    echo   Tesseract not found. Installing via winget...
+    winget install --id UB-Mannheim.TesseractOCR -e --accept-package-agreements --accept-source-agreements
+    if %errorlevel% neq 0 (
+        echo.
+        echo   WARNING: winget install failed. Install manually:
+        echo     https://github.com/UB-Mannheim/tesseract/wiki
+        echo   Then download vie.traineddata to Tesseract's tessdata folder:
+        echo     https://github.com/tesseract-ocr/tessdata_best
+        echo.
+    ) else (
+        echo   Tesseract installed. Add to PATH if needed, then restart terminal.
+        echo   Also download vie.traineddata to Tesseract's tessdata folder:
+        echo     https://github.com/tesseract-ocr/tessdata_best
+    )
+) else (
+    echo   Tesseract found: OK
+)
+
 :: ── Step 4: Install Playwright Chromium browser ───────────────────────────
 echo.
 echo [4/5] Installing Playwright Chromium browser (may take a few minutes)...
