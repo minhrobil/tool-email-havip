@@ -191,33 +191,122 @@ class TestCalculateDeadline:
 # ── classify_document ─────────────────────────────────────────────────────
 
 class TestClassifyDocument:
-    def test_du_dinh_tu_choi(self):
-        text = "Thông báo dự định từ chối đơn đăng ký nhãn hiệu"
-        assert classify_document(text) == "Dự định từ chối"
+    # ── TBCB ──────────────────────────────────────────────────────────────────
+    def test_tbcb_nhan_hieu(self):
+        text = "Đề nghị nộp lệ phí để được cấp Giấy chứng nhận đăng ký nhãn hiệu"
+        assert classify_document(text) == "TBCB"
 
-    def test_tu_choi_huy_bo_hlc(self):
-        # Must be classified BEFORE "Cấp toàn bộ" even though body contains
-        # "đáp ứng các điều kiện bảo hộ"
+    def test_tbcb_kieu_dang(self):
+        text = "Đề nghị nộp lệ phí để được cấp Bằng độc quyền kiểu dáng công nghiệp"
+        assert classify_document(text) == "TBCB"
+
+    def test_tbcb_sang_che(self):
+        text = "để được cấp và duy trì hiệu lực năm thứ nhất của Bằng độc quyền sáng chế"
+        assert classify_document(text) == "TBCB"
+
+    def test_tbcb_giai_phap_huu_ich(self):
+        text = "để được cấp và duy trì hiệu lực năm thứ nhất của Bằng độc quyền giải pháp hữu ích"
+        assert classify_document(text) == "TBCB"
+
+    # TBCB must win even when "đáp ứng các điều kiện bảo hộ đối với" is also present
+    def test_tbcb_wins_over_tbnd_phrase6(self):
+        text = (
+            "Đối tượng trong đơn nêu trên đáp ứng các điều kiện bảo hộ đối với nhóm 25. "
+            "Đề nghị nộp lệ phí để được cấp Giấy chứng nhận đăng ký nhãn hiệu."
+        )
+        assert classify_document(text) == "TBCB"
+
+    # ── TBND/QĐTC ─────────────────────────────────────────────────────────────
+    def test_tbnd_se_bi_tu_choi(self):
+        text = "Đối tượng trong đơn nêu trên sẽ bị từ chối cấp Giấy chứng nhận đăng ký nhãn hiệu"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    def test_tbnd_dap_ung_mot_phan(self):
+        text = "Đối tượng trong đơn nêu trên đáp ứng các điều kiện bảo hộ đối với nhóm 25 nhưng bị từ chối nhóm 35"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    def test_tbnd_khong_dap_ung_tieu_chuan(self):
+        text = "Đối tượng nêu trong đơn không đáp ứng tiêu chuẩn bảo hộ theo quy định"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    def test_tbnd_ve_viec_tu_choi_nhan_hieu(self):
+        text = "Về việc từ chối cấp Giấy chứng nhận đăng ký nhãn hiệu số 4-2024-12345"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    def test_tbnd_ve_viec_tu_choi_kieu_dang(self):
+        text = "Về việc từ chối cấp Bằng độc quyền kiểu dáng công nghiệp"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    def test_tbnd_ve_viec_tu_choi_sang_che(self):
+        text = "Về việc từ chối cấp Bằng độc quyền sáng chế số 1-2023-00001"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    def test_tbnd_ve_viec_tu_choi_gphui(self):
+        text = "Về việc từ chối cấp Bằng độc quyền giải pháp hữu ích"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    def test_tbnd_tu_choi_bao_ho_quoc_te(self):
+        text = "Về việc từ chối bảo hộ kiểu dáng công nghiệp đăng ký quốc tế tại Việt Nam"
+        assert classify_document(text) == "TBND/QĐTC"
+
+    # ── TĐHT/DL2M ─────────────────────────────────────────────────────────────
+    def test_tdht_vv_tham_dinh_hinh_thuc(self):
+        text = "V/v thông báo kết quả thẩm định hình thức đơn đăng ký nhãn hiệu"
+        assert classify_document(text) == "TĐHT/DL2M"
+
+    def test_tdht_02_thang(self):
+        text = "Trong thời hạn 02 tháng kể từ ngày ra thông báo này, bổ sung tài liệu còn thiếu"
+        assert classify_document(text) == "TĐHT/DL2M"
+
+    # ── CNĐ ───────────────────────────────────────────────────────────────────
+    def test_cnd(self):
+        text = "Về việc chấp nhận đơn hợp lệ số 4-2026-10000"
+        assert classify_document(text) == "CNĐ"
+
+    # ── TB0DL ─────────────────────────────────────────────────────────────────
+    def test_tb0dl_phan_doi(self):
+        text = "V/v thông báo kết quả xử lý ý kiến phản đối đơn số 4-2025-20000"
+        assert classify_document(text) == "TB0DL"
+
+    def test_tb0dl_gia_han(self):
+        text = "Về việc gia hạn hiệu lực Giấy chứng nhận đăng ký nhãn hiệu số 12345"
+        assert classify_document(text) == "TB0DL"
+
+    def test_tb0dl_duy_tri_sang_che(self):
+        text = "Về việc duy trì hiệu lực Bằng độc quyền sáng chế số 2024-00001"
+        assert classify_document(text) == "TB0DL"
+
+    def test_tb0dl_duy_tri_gphui(self):
+        text = "Ghi nhận yêu cầu duy trì hiệu lực Bằng độc quyền giải pháp hữu ích"
+        assert classify_document(text) == "TB0DL"
+
+    def test_tb0dl_tiep_tuc_xu_ly(self):
+        text = "Đơn sẽ được tiếp tục xử lý theo quy định sau khi có kết quả thẩm định cuối cùng"
+        assert classify_document(text) == "TB0DL"
+
+    def test_tb0dl_chap_nhan_sua_doi(self):
+        text = "Chấp nhận yêu cầu sửa đổi, bổ sung đơn số 4-2025-20000"
+        assert classify_document(text) == "TB0DL"
+
+    def test_tb0dl_ghi_nhan_thay_doi(self):
+        text = "Ghi nhận thay đổi người nộp đơn theo yêu cầu"
+        assert classify_document(text) == "TB0DL"
+
+    def test_tb0dl_thu_ly_khieu_nai(self):
+        text = "Về việc thụ lý giải quyết khiếu nại lần đầu theo đơn của công ty"
+        assert classify_document(text) == "TB0DL"
+
+    # ── Unclassified ──────────────────────────────────────────────────────────
+    def test_unclassified(self):
+        text = "Đây là nội dung không rõ ràng"
+        assert classify_document(text) is None
+
+    def test_tu_choi_huy_bo_hlc_not_classified(self):
+        # "từ chối hủy bỏ hiệu lực" (refuse cancellation) is not in the new rules
         text = (
             "Từ chối yêu cầu hủy bỏ hiệu lực GCNĐKNH số 286000 vì việc cấp "
             "GCNĐKNH là đáp ứng các điều kiện bảo hộ theo quy định pháp luật."
         )
-        assert classify_document(text) == "Từ chối hủy bỏ HLC"
-
-    def test_tu_choi_toan_bo(self):
-        text = "Cục từ chối cấp văn bằng bảo hộ đối với toàn bộ các sản phẩm"
-        assert classify_document(text) == "Từ chối toàn bộ"
-
-    def test_cap_toan_bo(self):
-        text = "Đơn đăng ký đáp ứng các điều kiện bảo hộ, đề nghị nộp lệ phí"
-        assert classify_document(text) == "Cấp toàn bộ"
-
-    def test_kqtd_noi_dung(self):
-        text = "Thông báo kết quả thẩm định nội dung đơn đăng ký nhãn hiệu"
-        assert classify_document(text) == "KQTĐ nội dung"
-
-    def test_unclassified(self):
-        text = "Đây là nội dung không rõ ràng"
         assert classify_document(text) is None
 
 
@@ -287,7 +376,7 @@ class TestParseDocument:
     Số đơn: 4-2025-20619
     Số yêu cầu: CĐ4-2026-00098
 
-    Cục Sở hữu trí tuệ thông báo dự định từ chối đăng ký nhãn hiệu quốc gia.
+    Đối tượng trong đơn nêu trên sẽ bị từ chối cấp Giấy chứng nhận đăng ký nhãn hiệu do không đáp ứng điều kiện.
 
     Trong thời hạn 03 tháng kể từ ngày ra thông báo này, quý khách cần nộp ý kiến phản đối.
     """
@@ -301,7 +390,7 @@ class TestParseDocument:
         assert result.so_yeu_cau == "CĐ4-2026-00098"
         assert result.deadline_months == 3
         assert result.deadline_date == date(2026, 7, 13)
-        assert result.loai_cong_van == "Dự định từ chối"
+        assert result.loai_cong_van == "TBND/QĐTC"
         assert result.loai_hinh_don == "Nhãn hiệu"
 
     def test_empty_text(self):
@@ -403,7 +492,7 @@ kể từ ngày nhận được hoặc biết được Thông báo này.
 
     def test_loai_cong_van(self):
         result = parse_document(text=self.SAMPLE_TEXT)
-        assert result.loai_cong_van == "Từ chối hủy bỏ HLC"
+        assert result.loai_cong_van is None
 
     def test_loai_hinh_don(self):
         result = parse_document(text=self.SAMPLE_TEXT)

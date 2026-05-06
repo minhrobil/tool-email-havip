@@ -22,9 +22,9 @@ Deadline calculation note:
   Day-based deadlines (e.g. "90 ngày") are rounded to the nearest whole month.
 
 Adding new classification rules:
-  Append a tuple (label, [phrase1, phrase2, ...]) to CLASSIFICATION_RULES.
-  All phrases must appear (case-insensitive) for the rule to match.
-  First matching rule wins.
+  Append a tuple (label, [phrase]) to CLASSIFICATION_RULES.
+  Each tuple = one phrase (OR logic: any matching phrase → its label).
+  First matching rule wins — ORDER MATTERS.
 """
 from __future__ import annotations
 
@@ -143,19 +143,44 @@ _RE_SO_GCN = re.compile(
 # First matching rule wins — ORDER MATTERS.
 
 CLASSIFICATION_RULES: List[tuple] = [
-    ("Dự định từ chối",            ["dự định từ chối"]),
-    # Must come before "Cấp toàn bộ" because rejection-of-cancellation docs also contain
-    # "đáp ứng các điều kiện bảo hộ" in their body text.
-    ("Từ chối hủy bỏ HLC",         ["từ chối", "hủy bỏ hiệu lực"]),
-    ("Từ chối toàn bộ",            ["từ chối cấp", "toàn bộ"]),
-    ("Từ chối một phần",           ["từ chối cấp"]),
-    ("Cấp toàn bộ",                ["đáp ứng các điều kiện bảo hộ"]),
-    ("Cấp một phần",               ["đáp ứng điều kiện bảo hộ", "một phần"]),
-    ("KQTĐ nội dung",              ["kết quả thẩm định nội dung"]),
-    ("KQTĐ hình thức",             ["kết quả thẩm định hình thức"]),
-    ("KQTĐ đơn thay đổi",          ["thẩm định", "thay đổi"]),
-    ("Yêu cầu sửa đổi bổ sung",    ["yêu cầu sửa đổi"]),
-    ("Thông báo vi phạm",          ["vi phạm"]),
+    # ── TBCB: thông báo cấp bằng / văn bằng ──────────────────────────────────
+    # Source: Mapping.docx phrases 1-4. Check first — these docs also contain
+    # "đáp ứng các điều kiện bảo hộ" (TBND phrase 6), so must take priority.
+    ("TBCB", ["để được cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
+    ("TBCB", ["để được cấp Bằng độc quyền kiểu dáng công nghiệp"]),
+    ("TBCB", ["để được cấp và duy trì hiệu lực năm thứ nhất của Bằng độc quyền sáng chế"]),
+    ("TBCB", ["để được cấp và duy trì hiệu lực năm thứ nhất của Bằng độc quyền giải pháp hữu ích"]),
+
+    # ── TBND/QĐTC: thông báo nêu dự định từ chối / quyết định từ chối ────────
+    # Source: Mapping.docx phrases 5-12
+    ("TBND/QĐTC", ["Đối tượng trong đơn nêu trên sẽ bị từ chối cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
+    ("TBND/QĐTC", ["Đối tượng trong đơn nêu trên đáp ứng các điều kiện bảo hộ đối với"]),
+    ("TBND/QĐTC", ["Đối tượng nêu trong đơn không đáp ứng tiêu chuẩn bảo hộ"]),
+    ("TBND/QĐTC", ["Về việc từ chối cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
+    ("TBND/QĐTC", ["Về việc từ chối cấp Bằng độc quyền kiểu dáng công nghiệp"]),
+    ("TBND/QĐTC", ["Về việc từ chối cấp Bằng độc quyền sáng chế"]),
+    ("TBND/QĐTC", ["Về việc từ chối cấp Bằng độc quyền giải pháp hữu ích"]),
+    ("TBND/QĐTC", ["Về việc từ chối bảo hộ kiểu dáng công nghiệp đăng ký quốc tế tại Việt Nam"]),
+
+    # ── TĐHT/DL2M: thẩm định hình thức, deadline 2 tháng ─────────────────────
+    # Source: Mapping.docx phrases 13-14
+    ("TĐHT/DL2M", ["V/v thông báo kết quả thẩm định hình thức"]),
+    ("TĐHT/DL2M", ["Trong thời hạn 02 tháng kể từ ngày"]),
+
+    # ── CNĐ: chấp nhận đơn hợp lệ ────────────────────────────────────────────
+    # Source: Mapping.docx phrase 15
+    ("CNĐ", ["Về việc chấp nhận đơn hợp lệ"]),
+
+    # ── TB0DL: thông báo không có deadline ────────────────────────────────────
+    # Source: Mapping.docx phrases 16-23
+    ("TB0DL", ["V/v thông báo kết quả xử lý ý kiến phản đối đơn"]),
+    ("TB0DL", ["Về việc gia hạn hiệu lực Giấy chứng nhận đăng ký nhãn hiệu"]),
+    ("TB0DL", ["Về việc duy trì hiệu lực Bằng độc quyền sáng chế"]),
+    ("TB0DL", ["Ghi nhận yêu cầu duy trì hiệu lực Bằng độc quyền giải pháp hữu ích"]),
+    ("TB0DL", ["sẽ được tiếp tục xử lý theo quy định sau khi có kết quả thẩm định cuối cùng"]),
+    ("TB0DL", ["Chấp nhận yêu cầu sửa đổi, bổ sung đơn"]),
+    ("TB0DL", ["Ghi nhận thay đổi người nộp đơn"]),
+    ("TB0DL", ["Về việc thụ lý giải quyết khiếu nại lần đầu"]),
 ]
 
 # Application type detection rules
