@@ -27,6 +27,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+# ── DupCheckResult ─────────────────────────────────────────────────────────
+
+@dataclass
+class DupCheckResult:
+    """Result of a dedup check.
+
+    is_dup=True, needs_redownload=False  → skip entirely (already processed)
+    is_dup=True, needs_redownload=True   → re-download files, skip Excel write
+    is_dup=False                         → process as a new email
+    """
+    is_dup: bool
+    reason: str = ""
+    needs_redownload: bool = False
+    download_url: Optional[str] = None
+
 from ..folder.routing import get_tool_export_folder
 
 logger = logging.getLogger(__name__)
@@ -41,8 +56,21 @@ class DedupRecord:
     date_folder: str
     so_don: Optional[str]
     attachment_filenames: List[str] = field(default_factory=list)
+    download_url: Optional[str] = None      # portal URL — stored for fast re-download
     processed_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     run_status: str = "OK"
+    # ── Excel row snapshot (used for full Excel regeneration) ──────────────
+    excel_seq: Optional[int] = None
+    excel_recv_date: Optional[str] = None       # DD/MM/YYYY — for date separator row
+    excel_so_cong_van_num: Optional[str] = None
+    excel_loai_cong_van: Optional[str] = None
+    excel_issue_date_iso: Optional[str] = None  # YYYY-MM-DD
+    excel_deadline_months: Optional[int] = None
+    excel_so_don: Optional[str] = None
+    excel_nhan_hieu: Optional[str] = None
+    excel_loi: Optional[str] = None
+    excel_is_scan: bool = False
+    excel_highlight_red: bool = False
 
 
 class DedupManager:
@@ -55,9 +83,13 @@ class DedupManager:
         self._folder = daily_folder
         # _processed.json lives exclusively in ~/.tool_mail_cong_van/<date>/
         self._file = get_tool_export_folder(daily_folder.name) / _PROCESSED_FILE
+        # Keep the actual output folder to detect deleted files
+        self._output_folder = daily_folder
         self._records: Dict[str, DedupRecord] = {}   # keyed by message_id
         self._tech_keys: Set[str] = set()            # message_id + internet_message_id
         self._business_keys: Set[str] = set()        # date_folder|so_don, date_folder|filename
+        self._id_by_tech_key: Dict[str, str] = {}    # tech_key → message_id
+        self._id_by_bkey: Dict[str, str] = {}        # bkey → message_id
         self._load()
 
     # ── Public ─────────────────────────────────────────────────────────────
@@ -69,34 +101,72 @@ class DedupManager:
         date_folder: str,
         so_don: Optional[str] = None,
         attachment_filenames: Optional[List[str]] = None,
-    ) -> Tuple[bool, str]:
+    ) -> DupCheckResult:
         """
         Check whether this email was already processed in this daily folder.
-        Returns (is_dup: bool, reason: str).
 
-        Reason is a human-readable explanation for logging.
+        Returns DupCheckResult:
+          is_dup=True,  needs_redownload=False  → skip (already processed, files OK)
+          is_dup=True,  needs_redownload=True   → re-download files, skip Excel write
+          is_dup=False                          → new email, full processing
         """
+        matched_rec: Optional[DedupRecord] = None
+        reason = ""
+
         # 1. internet_message_id (RFC 2822, most reliable)
         if internet_message_id and internet_message_id in self._tech_keys:
-            return True, f"internetMessageId match: {internet_message_id[:40]}"
+            matched_rec = self._records.get(self._id_by_tech_key.get(internet_message_id, ""))
+            reason = f"internetMessageId match: {internet_message_id[:40]}"
 
         # 2. Graph message id
-        if message_id in self._tech_keys:
-            return True, f"message_id match: {message_id[:20]}…"
+        if matched_rec is None and message_id in self._tech_keys:
+            matched_rec = self._records.get(message_id)
+            reason = f"message_id match: {message_id[:20]}…"
 
         # 3. Business key: folder + so_don
-        if so_don:
+        if matched_rec is None and so_don:
             bk = _bkey(date_folder, so_don)
             if bk in self._business_keys:
-                return True, f"business key (so_don): {bk}"
+                matched_rec = self._records.get(self._id_by_bkey.get(bk, ""))
+                reason = f"business key (so_don): {bk}"
 
         # 4. Business key: folder + attachment filename
-        for fn in (attachment_filenames or []):
-            bk = _bkey(date_folder, fn)
-            if bk in self._business_keys:
-                return True, f"business key (filename): {bk}"
+        if matched_rec is None:
+            for fn in (attachment_filenames or []):
+                bk = _bkey(date_folder, fn)
+                if bk in self._business_keys:
+                    matched_rec = self._records.get(self._id_by_bkey.get(bk, ""))
+                    reason = f"business key (filename): {bk}"
+                    break
 
-        return False, ""
+        if matched_rec is None:
+            return DupCheckResult(is_dup=False)
+
+        # ── File-existence check ───────────────────────────────────────────
+        # If any previously downloaded file is missing on disk, signal
+        # needs_redownload so the caller re-downloads but skips Excel write.
+        stored_files = matched_rec.attachment_filenames or []
+        if stored_files:
+            missing = [
+                f for f in stored_files
+                if not (self._output_folder / f).exists()
+            ]
+            if missing:
+                logger.info(
+                    "Dedup match (%s) nhưng %d/%d file bị thiếu tại %s → tải lại. "
+                    "URL đã lưu: %s",
+                    reason, len(missing), len(stored_files),
+                    self._output_folder,
+                    matched_rec.download_url or "(không có)",
+                )
+                return DupCheckResult(
+                    is_dup=True,
+                    reason=reason,
+                    needs_redownload=True,
+                    download_url=matched_rec.download_url,
+                )
+
+        return DupCheckResult(is_dup=True, reason=reason)
 
     def register(
         self,
@@ -105,7 +175,20 @@ class DedupManager:
         date_folder: str,
         so_don: Optional[str] = None,
         attachment_filenames: Optional[List[str]] = None,
+        download_url: Optional[str] = None,
         run_status: str = "OK",
+        # Excel row snapshot
+        excel_seq: Optional[int] = None,
+        excel_recv_date: Optional[str] = None,
+        excel_so_cong_van_num: Optional[str] = None,
+        excel_loai_cong_van: Optional[str] = None,
+        excel_issue_date_iso: Optional[str] = None,
+        excel_deadline_months: Optional[int] = None,
+        excel_so_don: Optional[str] = None,
+        excel_nhan_hieu: Optional[str] = None,
+        excel_loi: Optional[str] = None,
+        excel_is_scan: bool = False,
+        excel_highlight_red: bool = False,
     ) -> DedupRecord:
         """
         Record this email as processed and persist to _processed.json.
@@ -117,7 +200,19 @@ class DedupManager:
             date_folder=date_folder,
             so_don=so_don,
             attachment_filenames=attachment_filenames or [],
+            download_url=download_url,
             run_status=run_status,
+            excel_seq=excel_seq,
+            excel_recv_date=excel_recv_date,
+            excel_so_cong_van_num=excel_so_cong_van_num,
+            excel_loai_cong_van=excel_loai_cong_van,
+            excel_issue_date_iso=excel_issue_date_iso,
+            excel_deadline_months=excel_deadline_months,
+            excel_so_don=excel_so_don,
+            excel_nhan_hieu=excel_nhan_hieu,
+            excel_loi=excel_loi,
+            excel_is_scan=excel_is_scan,
+            excel_highlight_red=excel_highlight_red,
         )
         self._index(rec)
         self._save()
@@ -125,6 +220,67 @@ class DedupManager:
 
     def count(self) -> int:
         return len(self._records)
+
+    def rebuild_excel(self, writer: "ExcelWriter") -> None:
+        """Delete and rebuild the entire Excel from stored record snapshots.
+
+        Called when any file was missing and re-downloaded. All records for the
+        day are re-written in seq order so the Excel stays consistent.
+        Records without an excel_seq snapshot are silently skipped.
+        """
+        from datetime import date as _date
+        # Delete old Excel so we start fresh
+        if writer.excel_path.exists():
+            writer.excel_path.unlink()
+
+        recs = sorted(
+            (r for r in self._records.values() if r.excel_seq is not None),
+            key=lambda r: r.excel_seq,
+        )
+        if not recs:
+            return
+
+        # Write date separator row once, before first data row
+        first = recs[0]
+        if first.excel_recv_date:
+            writer.append_date_row(first.excel_recv_date)
+
+        for rec in recs:
+            issue_date = None
+            if rec.excel_issue_date_iso:
+                try:
+                    issue_date = _date.fromisoformat(rec.excel_issue_date_iso)
+                except ValueError:
+                    pass
+            row = {
+                "Ngày nhận công văn": rec.excel_seq,
+                "Số công văn":        rec.excel_so_cong_van_num or "",
+                "Loại công văn":      rec.excel_loai_cong_van or "",
+                "Ngày issue công văn": issue_date,
+                "Số tháng deadline":  rec.excel_deadline_months,
+                "Số đơn":             rec.excel_so_don or "",
+                "Loại hình đơn":      "",
+                "Nội dung công văn":  rec.excel_nhan_hieu or "",
+            }
+            if rec.excel_loi:
+                row["Lỗi"] = rec.excel_loi
+            writer.append_data_row(
+                row,
+                highlight_red=rec.excel_highlight_red,
+                highlight_yellow=rec.excel_is_scan,
+            )
+            writer.append_meta_row({
+                "message_id":           rec.message_id,
+                "internet_message_id":  rec.internet_message_id or "",
+                "date_folder":          rec.date_folder,
+                "so_don":               rec.so_don or "",
+                "attachment_filenames": "; ".join(rec.attachment_filenames),
+                "processed_at":         rec.processed_at,
+                "run_status":           rec.run_status,
+            })
+        logger.info(
+            "Rebuilt Excel with %d record(s) → %s", len(recs), writer.excel_path.name
+        )
 
     # ── Private ────────────────────────────────────────────────────────────
 
@@ -140,8 +296,20 @@ class DedupManager:
                     date_folder=r.get("date_folder", ""),
                     so_don=r.get("so_don"),
                     attachment_filenames=r.get("attachment_filenames", []),
+                    download_url=r.get("download_url"),
                     processed_at=r.get("processed_at", ""),
                     run_status=r.get("run_status", "OK"),
+                    excel_seq=r.get("excel_seq"),
+                    excel_recv_date=r.get("excel_recv_date"),
+                    excel_so_cong_van_num=r.get("excel_so_cong_van_num"),
+                    excel_loai_cong_van=r.get("excel_loai_cong_van"),
+                    excel_issue_date_iso=r.get("excel_issue_date_iso"),
+                    excel_deadline_months=r.get("excel_deadline_months"),
+                    excel_so_don=r.get("excel_so_don"),
+                    excel_nhan_hieu=r.get("excel_nhan_hieu"),
+                    excel_loi=r.get("excel_loi"),
+                    excel_is_scan=r.get("excel_is_scan", False),
+                    excel_highlight_red=r.get("excel_highlight_red", False),
                 )
                 self._index(rec)
             logger.debug(
@@ -155,12 +323,18 @@ class DedupManager:
     def _index(self, rec: DedupRecord) -> None:
         self._records[rec.message_id] = rec
         self._tech_keys.add(rec.message_id)
+        self._id_by_tech_key[rec.message_id] = rec.message_id
         if rec.internet_message_id:
             self._tech_keys.add(rec.internet_message_id)
+            self._id_by_tech_key[rec.internet_message_id] = rec.message_id
         if rec.so_don:
-            self._business_keys.add(_bkey(rec.date_folder, rec.so_don))
+            bk = _bkey(rec.date_folder, rec.so_don)
+            self._business_keys.add(bk)
+            self._id_by_bkey[bk] = rec.message_id
         for fn in rec.attachment_filenames:
-            self._business_keys.add(_bkey(rec.date_folder, fn))
+            bk = _bkey(rec.date_folder, fn)
+            self._business_keys.add(bk)
+            self._id_by_bkey[bk] = rec.message_id
 
     def _save(self) -> None:
         # self._file already points to ~/.tool_mail_cong_van/<date>/_processed.json

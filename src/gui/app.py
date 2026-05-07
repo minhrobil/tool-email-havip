@@ -73,9 +73,9 @@ _FREQ_LABELS = list(_FREQ_HOURS.keys())
 def _read_range_stats(date_from: datetime, date_to: datetime, date_folder_format: str) -> dict:
     """
     Read _processed.json files for each day in [date_from, date_to] and sum counts.
-    Returns a dict with keys: success, file_err, missing_data, dup, error, total.
+    Returns a dict with keys: success, file_err, scan, missing_data, dup, error, total.
     """
-    stats = {"success": 0, "file_err": 0, "missing_data": 0, "dup": 0, "error": 0, "total": 0}
+    stats = {"success": 0, "file_err": 0, "scan": 0, "missing_data": 0, "dup": 0, "error": 0, "total": 0}
     tool_base = Path.home() / ".tool_mail_cong_van"
     cur = date_from.date()
     end = date_to.date()
@@ -126,7 +126,7 @@ class CongVanApp(tk.Tk):
         self._login_in_progress = False
         self._login_secs_left   = 0
         self._last_auto_scan_slot = -1
-        self._base_stats: dict = {"success": 0, "file_err": 0, "missing_data": 0, "dup": 0, "error": 0, "total": 0}
+        self._base_stats: dict = {"success": 0, "file_err": 0, "scan": 0, "missing_data": 0, "dup": 0, "error": 0, "total": 0}
 
         self._setup_file_logging()
 
@@ -376,65 +376,18 @@ class CongVanApp(tk.Tk):
             font=(_FONT, 8), bg=_CARD_BG, fg=_TEXT_MUTED,
         ).pack(side=tk.LEFT)
 
-        # Row 1 — search mode + folder/sender
-        _lbl("Tìm email:", 1)
-        search_row = tk.Frame(g, bg=_CARD_BG)
-        search_row.grid(row=1, column=1, sticky="ew", pady=4)
-
-        self._search_mode_var = tk.StringVar(value="sender")
-
-        rb_folder = tk.Radiobutton(
-            search_row, text="Theo thư mục",
-            variable=self._search_mode_var, value="folder",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT,
-            activebackground=_CARD_BG, selectcolor=_CARD_BG,
-            cursor="hand2", command=self._on_search_mode_change,
-        )
-        rb_folder.pack(side=tk.LEFT, padx=(0, 8))
-
-        rb_sender = tk.Radiobutton(
-            search_row, text="Theo người gửi",
-            variable=self._search_mode_var, value="sender",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT,
-            activebackground=_CARD_BG, selectcolor=_CARD_BG,
-            cursor="hand2", command=self._on_search_mode_change,
-        )
-        rb_sender.pack(side=tk.LEFT)
-
-        # Row 2 — folder name entry (show/hide via grid)
-        self._folder_lbl = tk.Label(
-            g, text="Thư mục mail:",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, anchor="e",
-        )
-        self._folder_lbl.grid(row=2, column=0, sticky="e", padx=(0, 8), pady=2)
-        self._mail_folder_var = tk.StringVar(value="Công văn")
-        self._mail_folder_entry = ttk.Entry(
-            g, textvariable=self._mail_folder_var, font=(_FONT, 9), width=24,
-        )
-        self._mail_folder_entry.grid(row=2, column=1, sticky="w", pady=2)
-
-        # Row 3 — sender email entry (show/hide via grid)
-        self._sender_lbl = tk.Label(
-            g, text="Email người gửi:",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, anchor="e",
-        )
-        self._sender_lbl.grid(row=3, column=0, sticky="e", padx=(0, 8), pady=2)
+        # Row 1 — sender email
+        _lbl("Email người gửi:", 1)
         self._sender_email_var = tk.StringVar(value="cucsohuutritue@ipvietnam.gov.vn")
         self._sender_email_entry = ttk.Entry(
-            g, textvariable=self._sender_email_var, font=(_FONT, 9), width=30,
+            g, textvariable=self._sender_email_var, font=(_FONT, 9), width=34,
         )
-        self._sender_email_entry.grid(row=3, column=1, sticky="w", pady=2)
-        # Hide folder row by default (sender is default mode)
-        self._folder_lbl.grid_remove()
-        self._mail_folder_entry.grid_remove()
-        # Hide sender row initially — _on_search_mode_change will show correct one
-        self._sender_lbl.grid_remove()
-        self._sender_email_entry.grid_remove()
+        self._sender_email_entry.grid(row=1, column=1, sticky="w", pady=4)
 
-        # Row 4 — export folder
-        _lbl("Export vào:", 4)
+        # Row 2 — export folder
+        _lbl("Export vào:", 2)
         export_row = tk.Frame(g, bg=_CARD_BG)
-        export_row.grid(row=4, column=1, sticky="ew", pady=4)
+        export_row.grid(row=2, column=1, sticky="ew", pady=4)
         export_row.columnconfigure(0, weight=1)
 
         self._export_folder_var = tk.StringVar(value=_DEFAULT_EXPORT)
@@ -451,10 +404,10 @@ class CongVanApp(tk.Tk):
         )
         self._choose_folder_btn.grid(row=0, column=1)
 
-        # Row 5 — auto-scan
-        _lbl("Tự động quét:", 5)
+        # Row 3 — auto-scan
+        _lbl("Tự động quét:", 3)
         auto_cells = tk.Frame(g, bg=_CARD_BG)
-        auto_cells.grid(row=5, column=1, sticky="w", pady=4)
+        auto_cells.grid(row=3, column=1, sticky="w", pady=4)
 
         self._auto_scan_var = tk.BooleanVar(value=True)
         self._auto_scan_cb = tk.Checkbutton(
@@ -532,9 +485,9 @@ class CongVanApp(tk.Tk):
         dash_row = tk.Frame(f, bg=_BG, pady=10)
         dash_row.pack(fill=tk.X, padx=20)
 
-        self._dash_found      = self._stat_card(dash_row, "📬 Tìm thấy",      "0", _NAVY)
-        self._dash_processing = self._stat_card(dash_row, "⏳ Đang xử lý",    "0", _ORANGE)
-        self._dash_done       = self._stat_card(dash_row, "✅ Đã xử lý",      "0", _GREEN)
+        self._dash_found      = self._stat_card(dash_row, "📬 Đã tìm thấy",  "0", _NAVY)
+        self._dash_processing = self._stat_card(dash_row, "⏳ Đang tải về",   "0", _ORANGE)
+        self._dash_done       = self._stat_card(dash_row, "✅ Đã tải về",     "0", _GREEN)
 
         for w in (self._dash_found[0], self._dash_processing[0], self._dash_done[0]):
             w.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=4)
@@ -543,14 +496,14 @@ class CongVanApp(tk.Tk):
         stats_row = tk.Frame(f, bg=_BG, pady=2)
         stats_row.pack(fill=tk.X, padx=20)
 
-        self._stat_ok          = self._stat_card(stats_row, "✓ Thành công",    "0", _GREEN)
-        self._stat_file_err    = self._stat_card(stats_row, "⚠ Lỗi tải file", "0", _ORANGE)
-        self._stat_missing     = self._stat_card(stats_row, "📋 Thiếu data",   "0", _ORANGE)
-        self._stat_dup         = self._stat_card(stats_row, "⟳ Đã có",        "0", _TEXT_MUTED)
-        self._stat_err         = self._stat_card(stats_row, "✗ Lỗi",           "0", _RED)
+        self._stat_ok          = self._stat_card(stats_row, "✓ File pdf chuẩn",      "0", _GREEN)
+        self._stat_file_err    = self._stat_card(stats_row, "⚠ Lỗi tải về",          "0", _ORANGE)
+        self._stat_scan        = self._stat_card(stats_row, "🔍 File scan",           "0", _ORANGE)
+        self._stat_read_err    = self._stat_card(stats_row, "✗ File đọc lỗi",        "0", _RED)
+        self._stat_dup         = self._stat_card(stats_row, "⟳ File đã xử lý",      "0", _TEXT_MUTED)
 
-        for w in (self._stat_ok[0], self._stat_file_err[0], self._stat_missing[0],
-                  self._stat_dup[0], self._stat_err[0]):
+        for w in (self._stat_ok[0], self._stat_file_err[0], self._stat_scan[0],
+                  self._stat_read_err[0], self._stat_dup[0]):
             w.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=4)
 
     def _build_activities_tab(self, f: tk.Frame) -> None:
@@ -654,10 +607,7 @@ class CongVanApp(tk.Tk):
                 scopes=self._config.azure.scopes,
             )
             # Sync mail folder field with loaded config
-            self._mail_folder_var.set(self._config.mail.target_folder_name)
-            self._search_mode_var.set(self._config.mail.search_mode)
             self._sender_email_var.set(self._config.mail.sender_email)
-            self._on_search_mode_change()
         except (FileNotFoundError, ValueError) as exc:
             self._show_login()
             self._login_status.config(
@@ -709,9 +659,11 @@ class CongVanApp(tk.Tk):
         self._base_stats = dict(stats)
         self._stat_ok[1].set(str(stats.get("success", 0)))
         self._stat_file_err[1].set(str(stats.get("file_err", 0)))
-        self._stat_missing[1].set(str(stats.get("missing_data", 0)))
+        self._stat_scan[1].set(str(stats.get("scan", 0)))
+        scan    = stats.get("scan", 0)
+        f_err   = stats.get("file_err", 0)
+        self._stat_read_err[1].set(str(scan + f_err))
         self._stat_dup[1].set(str(stats.get("dup", 0)))
-        self._stat_err[1].set(str(stats.get("error", 0)))
         total = stats.get("total", 0)
         self._dash_found[1].set(str(total))
         self._dash_processing[1].set("0")
@@ -759,19 +711,6 @@ class CongVanApp(tk.Tk):
             )
             return None, None
         return d_from, d_to
-
-    def _on_search_mode_change(self) -> None:
-        mode = self._search_mode_var.get()
-        if mode == "folder":
-            self._folder_lbl.grid()
-            self._mail_folder_entry.grid()
-            self._sender_lbl.grid_remove()
-            self._sender_email_entry.grid_remove()
-        else:
-            self._folder_lbl.grid_remove()
-            self._mail_folder_entry.grid_remove()
-            self._sender_lbl.grid()
-            self._sender_email_entry.grid()
 
     def _do_choose_folder(self) -> None:
         folder = filedialog.askdirectory(
@@ -940,18 +879,11 @@ class CongVanApp(tk.Tk):
         output_folder = self._export_folder_var.get().strip() or _DEFAULT_EXPORT
         self._last_export_folder = output_folder
 
-        # Apply runtime mail search mode override
+        # Apply sender email override
         if self._config:
-            mode = self._search_mode_var.get()
-            self._config.mail.search_mode = mode
-            if mode == "folder":
-                folder_name = self._mail_folder_var.get().strip()
-                if folder_name:
-                    self._config.mail.target_folder_name = folder_name
-            else:
-                sender = self._sender_email_var.get().strip()
-                if sender:
-                    self._config.mail.sender_email = sender
+            sender = self._sender_email_var.get().strip()
+            if sender:
+                self._config.mail.sender_email = sender
 
         # ── Pre-scan: close any open Excel export files first ─────────────────
         excel_filename = self._config.output.excel_filename
@@ -1146,10 +1078,11 @@ class CongVanApp(tk.Tk):
                 f"{total} email tìm thấy  •  {success} thành công  •  {error} lỗi"
             )
 
-            # Dashboard: show pre-loaded + current scan counts
+            # Dashboard: show pre-loaded + current scan counts (subtract duplicates so found stays unique)
             base_total = self._base_stats.get("total", 0)
-            base_done  = self._base_stats.get("success", 0) + self._base_stats.get("file_err", 0) + self._base_stats.get("missing_data", 0)
-            self._dash_found[1].set(str(base_total + total))
+            base_done  = self._base_stats.get("success", 0) + self._base_stats.get("file_err", 0) + self._base_stats.get("scan", 0)
+            dup_so_far = stats.get("dup", 0) if stats else 0
+            self._dash_found[1].set(str(base_total + total - dup_so_far))
             self._dash_processing[1].set(str(total - current + 1))
             self._dash_done[1].set(str(base_done + current - 1))
         elif not is_sub_message:
@@ -1159,11 +1092,13 @@ class CongVanApp(tk.Tk):
 
         if stats:
             b = self._base_stats
+            scan    = b.get("scan", 0) + stats.get("scan", 0)
+            f_err   = b.get("file_err", 0) + stats.get("file_err", 0)
             self._stat_ok[1].set(str(b.get("success", 0) + stats.get("success", 0)))
-            self._stat_file_err[1].set(str(b.get("file_err", 0) + stats.get("file_err", 0)))
-            self._stat_missing[1].set(str(b.get("missing_data", 0) + stats.get("missing_data", 0)))
+            self._stat_file_err[1].set(str(f_err))
+            self._stat_scan[1].set(str(scan))
+            self._stat_read_err[1].set(str(scan + f_err))
             self._stat_dup[1].set(str(b.get("dup", 0) + stats.get("dup", 0)))
-            self._stat_err[1].set(str(b.get("error", 0) + stats.get("error", 0)))
 
     def _on_scan_done(self, result: ProcessResult) -> None:
         total = result.total_emails
@@ -1194,27 +1129,30 @@ class CongVanApp(tk.Tk):
 
         # Stat cards: accumulate scan result on top of pre-loaded baseline
         b = self._base_stats
+        scan  = b.get("scan", 0) + result.scan_count
+        f_err = b.get("file_err", 0) + result.file_error_count
         self._stat_ok[1].set(str(b.get("success", 0) + result.success_count))
-        self._stat_file_err[1].set(str(b.get("file_err", 0) + result.file_error_count))
-        self._stat_missing[1].set(str(b.get("missing_data", 0) + result.missing_data_count))
+        self._stat_file_err[1].set(str(f_err))
+        self._stat_scan[1].set(str(scan))
+        self._stat_read_err[1].set(str(scan + f_err))
         self._stat_dup[1].set(str(b.get("dup", 0) + result.duplicate_count))
-        self._stat_err[1].set(str(b.get("error", 0) + result.error_count))
 
         # Dashboard final values
         base_total = b.get("total", 0)
-        base_done  = b.get("success", 0) + b.get("file_err", 0) + b.get("missing_data", 0)
-        self._dash_found[1].set(str(base_total + total))
+        base_done  = b.get("success", 0) + b.get("file_err", 0) + b.get("scan", 0)
+        self._dash_found[1].set(str(base_total + total - result.duplicate_count))
         self._dash_processing[1].set("0")
         self._dash_done[1].set(str(base_done + extracted))
 
         # Update baseline so subsequent scans also accumulate correctly
         self._base_stats = {
             "success":      b.get("success", 0) + result.success_count,
-            "file_err":     b.get("file_err", 0) + result.file_error_count,
+            "file_err":     f_err,
+            "scan":         scan,
             "missing_data": b.get("missing_data", 0) + result.missing_data_count,
-            "dup":          b.get("dup", 0) + result.duplicate_count,
+            "dup":          0,  # reset each scan; next scan will count fresh duplicates
             "error":        b.get("error", 0) + result.error_count,
-            "total":        base_total + total,
+            "total":        base_total + total - result.duplicate_count,
         }
 
         # Show "open folder" button whenever scan finishes
@@ -1248,9 +1186,9 @@ class CongVanApp(tk.Tk):
         self._progress_bar["value"] = 0
         self._stat_ok[1].set("0")
         self._stat_file_err[1].set("0")
-        self._stat_missing[1].set("0")
+        self._stat_scan[1].set("0")
+        self._stat_read_err[1].set("0")
         self._stat_dup[1].set("0")
-        self._stat_err[1].set("0")
         self._dash_found[1].set("0")
         self._dash_processing[1].set("0")
         self._dash_done[1].set("0")
@@ -1274,7 +1212,6 @@ class CongVanApp(tk.Tk):
 
         self._from_date_entry.config(state=state_entry)
         self._to_date_entry.config(state=state_entry)
-        self._mail_folder_entry.config(state=state_entry)
         self._sender_email_entry.config(state=state_entry)
         self._auto_scan_freq_cb.config(state=state_combo)
         self._auto_scan_cb.config(state=state_btn)

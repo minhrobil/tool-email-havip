@@ -131,27 +131,27 @@ _RE_DEADLINE_DAYS = re.compile(
 )
 
 # "Nhãn hiệu: SKYLINE" — OCR may use { or space instead of colon
-# [^\w\n]{0,5} prevents crossing to next line; [^\n]+ captures rest of same line
+# [^\w\n]{1,5} requires at least one separator char (prevents matching "Nhãn hiệu." as noun)
 _RE_NHAN_HIEU = re.compile(
-    r"Nh[ãa]n hi[eệ]u[^\w\n]{0,5}([^\n]+)",
+    r"Nh[ãa]n hi[eệ]u[^\w\n]{1,5}([^\n]+)",
     re.UNICODE,
 )
 
 # "Tên sáng chế: Quạt trần" — OCR may give "ché" for "chế" and "{" for ":"
 _RE_TEN_SANG_CHE = re.compile(
-    r"T[êe]n s[áa]ng ch[^\s]{1,2}[^\w\n]{0,5}([^\n]+)",
+    r"T[êe]n s[áa]ng ch[^\s]{1,2}[^\w\n]{1,5}([^\n]+)",
     re.UNICODE,
 )
 
 # "Tên giải pháp hữu ích: BỘ GIẢM XÓC" — OCR-robust separator
 _RE_TEN_GPHI = re.compile(
-    r"T[êe]n gi[ảa]i ph[áa]p h[ữu][uư] [íiì]ch[^\w\n]{0,5}([^\n]+)",
+    r"T[êe]n gi[ảa]i ph[áa]p h[ữu][uư] [íiì]ch[^\w\n]{1,5}([^\n]+)",
     re.UNICODE,
 )
 
 # "Tên kiểu dáng công nghiệp: Bàn cờ caro" — OCR-robust separator
 _RE_TEN_KIEU_DANG = re.compile(
-    r"T[êe]n ki[eể][uư] d[áa]ng c[oô]ng ngh[iệ][eệ]p[^\w\n]{0,5}([^\n]+)",
+    r"T[êe]n ki[eể][uư] d[áa]ng c[oô]ng ngh[iệ][eệ]p[^\w\n]{1,5}([^\n]+)",
     re.UNICODE,
 )
 

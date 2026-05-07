@@ -36,31 +36,31 @@ def make_manager(tmp_path: Path) -> DedupManager:
 class TestDedupManagerFreshFolder:
     def test_no_duplicates_on_empty(self, tmp_path):
         mgr = make_manager(tmp_path)
-        is_dup, _ = mgr.is_duplicate("msg1", "imid1", "26.04.14")
-        assert is_dup is False
+        result = mgr.is_duplicate("msg1", "imid1", "26.04.14")
+        assert result.is_dup is False
 
     def test_register_and_detect_by_message_id(self, tmp_path):
         mgr = make_manager(tmp_path)
         mgr.register("msg1", "imid1", "26.04.14", so_don="4-2025-001")
-        is_dup, reason = mgr.is_duplicate("msg1", None, "26.04.14")
-        assert is_dup is True
-        assert "message_id" in reason
+        result = mgr.is_duplicate("msg1", None, "26.04.14")
+        assert result.is_dup is True
+        assert "message_id" in result.reason
 
     def test_register_and_detect_by_internet_message_id(self, tmp_path):
         mgr = make_manager(tmp_path)
         mgr.register("msg1", "imid1", "26.04.14", so_don="4-2025-001")
         # New message_id, same internet_message_id
-        is_dup, reason = mgr.is_duplicate("msg-different", "imid1", "26.04.14")
-        assert is_dup is True
-        assert "internetMessageId" in reason
+        result = mgr.is_duplicate("msg-different", "imid1", "26.04.14")
+        assert result.is_dup is True
+        assert "internetMessageId" in result.reason
 
     def test_register_and_detect_by_so_don(self, tmp_path):
         mgr = make_manager(tmp_path)
         mgr.register("msg1", None, "26.04.14", so_don="4-2025-001")
         # Different technical keys, same so_don
-        is_dup, reason = mgr.is_duplicate("msg2", "imid2", "26.04.14", so_don="4-2025-001")
-        assert is_dup is True
-        assert "so_don" in reason
+        result = mgr.is_duplicate("msg2", "imid2", "26.04.14", so_don="4-2025-001")
+        assert result.is_dup is True
+        assert "so_don" in result.reason
 
     def test_register_and_detect_by_filename(self, tmp_path):
         mgr = make_manager(tmp_path)
@@ -69,12 +69,35 @@ class TestDedupManagerFreshFolder:
             so_don=None,
             attachment_filenames=["thong_bao.pdf"],
         )
-        is_dup, reason = mgr.is_duplicate(
+        # Create the file so the existence check passes
+        (tmp_path / "thong_bao.pdf").write_bytes(b"%PDF")
+        result = mgr.is_duplicate(
             "msg2", "imid2", "26.04.14",
             attachment_filenames=["thong_bao.pdf"],
         )
-        assert is_dup is True
-        assert "filename" in reason
+        assert result.is_dup is True
+        assert "filename" in result.reason
+
+    def test_file_deleted_triggers_redownload(self, tmp_path):
+        """If a previously downloaded file is deleted, needs_redownload=True is signalled."""
+        mgr = make_manager(tmp_path)
+        pdf = tmp_path / "thong_bao.pdf"
+        pdf.write_bytes(b"%PDF")
+        mgr.register(
+            "msg1", "imid1", "26.04.14",
+            attachment_filenames=["thong_bao.pdf"],
+        )
+        # Confirm it's a normal dup while the file exists
+        result = mgr.is_duplicate("msg1", "imid1", "26.04.14")
+        assert result.is_dup is True
+        assert result.needs_redownload is False
+
+        # Delete the file — should signal needs_redownload (dup but file missing)
+        pdf.unlink()
+        mgr2 = make_manager(tmp_path)
+        result_after = mgr2.is_duplicate("msg1", "imid1", "26.04.14")
+        assert result_after.is_dup is True
+        assert result_after.needs_redownload is True
 
     def test_different_folder_not_duplicate(self, tmp_path):
         """Dedup is scoped per folder; same email in a different day is NOT a dup."""
@@ -82,10 +105,10 @@ class TestDedupManagerFreshFolder:
         mgr.register("msg1", "imid1", "26.04.14", so_don="4-2025-001")
         # Different date folder
         mgr2 = make_manager(tmp_path)  # reload from disk
-        _, _ = mgr2.is_duplicate("msg1", "imid1", "26.04.15", so_don="4-2025-001")
+        mgr2.is_duplicate("msg1", "imid1", "26.04.15", so_don="4-2025-001")
         # same manager but different date_folder in the business key
-        is_dup_bk, _ = mgr.is_duplicate("msg9", "imid9", "26.04.15", so_don="4-2025-001")
-        assert is_dup_bk is False  # different folder → not dup in business key
+        result_bk = mgr.is_duplicate("msg9", "imid9", "26.04.15", so_don="4-2025-001")
+        assert result_bk.is_dup is False  # different folder → not dup in business key
 
     def test_persistence_across_instances(self, tmp_path):
         """Records must survive creating a new DedupManager from the same folder."""
@@ -93,8 +116,8 @@ class TestDedupManagerFreshFolder:
         mgr1.register("msg1", "imid1", "26.04.14", so_don="4-2025-001")
 
         mgr2 = make_manager(tmp_path)  # reload from disk
-        is_dup, _ = mgr2.is_duplicate("msg1", "imid1", "26.04.14")
-        assert is_dup is True
+        result = mgr2.is_duplicate("msg1", "imid1", "26.04.14")
+        assert result.is_dup is True
 
     def test_json_file_written(self, tmp_path):
         mgr = make_manager(tmp_path)

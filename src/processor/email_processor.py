@@ -57,6 +57,7 @@ class ScanCancelledError(Exception):
 @dataclass
 class ProcessResult:
     success_count: int = 0
+    scan_count: int = 0         # emails with scan/image PDF (OCR failed or partial)
     duplicate_count: int = 0
     review_count: int = 0       # kept for summary text
     error_count: int = 0
@@ -76,11 +77,12 @@ class ProcessResult:
         fallback_note = f" | {self.fallback_count} dùng Desktop" if self.fallback_count else ""
         file_err_note = f" | {self.file_error_count} lỗi tải file" if self.file_error_count else ""
         missing_note  = f" | {self.missing_data_count} thiếu data" if self.missing_data_count else ""
+        scan_note     = f" | {self.scan_count} file scan (cần kiểm tra)" if self.scan_count else ""
         return (
             f"Hoàn thành{duration}: "
             f"{self.success_count} thành công | "
             f"{self.duplicate_count} bỏ qua (trùng)"
-            f"{file_err_note}{missing_note} | "
+            f"{scan_note}{file_err_note}{missing_note} | "
             f"{self.error_count} lỗi{fallback_note}  /  tổng {self.total_emails} email"
         )
 
@@ -125,6 +127,7 @@ class EmailProcessor:
                 "total":        result.total_emails,
                 "success":      result.success_count,
                 "file_err":     result.file_error_count,
+                "scan":         result.scan_count,
                 "missing_data": result.missing_data_count,
                 "dup":          result.duplicate_count,
                 "error":        result.error_count,
@@ -211,33 +214,13 @@ class EmailProcessor:
             headless=self._cfg.portal.headless,
         )
 
-        target = self._cfg.mail.target_folder_name
-        search_mode = self._cfg.mail.search_mode
-
-        if search_mode == "sender":
-            sender = self._cfg.mail.sender_email
-            log(f"Đang tìm email từ '{sender}' trong hộp thư đến...")
-            messages = reader.get_messages_by_sender(
-                sender,
-                received_after=date_from,
-                received_before=date_to,
-            )
-        else:
-            log(f"Đang tìm thư mục '{target}'...")
-            folder = reader.find_cong_van_folder(target)
-            if folder is None:
-                _fail(result, (
-                    f"Không tìm thấy thư mục '{target}' trong hộp thư. "
-                    "Kiểm tra 'mail.target_folder_name' trong config.json."
-                ))
-                return [], None, None, True
-
-            log(f"Đã tìm thấy: '{folder.display_name}'")
-            messages = reader.get_messages(
-                folder.id,
-                received_after=date_from,
-                received_before=date_to,
-            )
+        sender = self._cfg.mail.sender_email
+        log(f"Đang tìm email từ '{sender}' trong hộp thư đến...")
+        messages = reader.get_messages_by_sender(
+            sender,
+            received_after=date_from,
+            received_before=date_to,
+        )
         return messages, att_downloader, browser_dl, False
 
     # ── Per-message pipeline ───────────────────────────────────────────────
@@ -266,11 +249,12 @@ class EmailProcessor:
         # (runs under lock so duplicate_count stays thread-safe)
         with self._write_lock:
             dedup = DedupManager(daily_folder)
-            if self._check_dup(dedup, msg, folder_name, None, None, "kỹ thuật", log, result):
+            skip, _redownload = self._check_dup(dedup, msg, folder_name, None, None, "kỹ thuật", log, result)
+            if skip:
                 return
 
         # ── PARALLEL PHASE: portal download + PDF parse (no lock) ──────────
-        att_filenames, downloaded_paths, notes, status = self._acquire_files(
+        att_filenames, downloaded_paths, notes, status, portal_url = self._acquire_files(
             msg, att_downloader, browser_dl, daily_folder, cfg, log
         )
         file_had_error = status == _STATUS_REVIEW
@@ -285,13 +269,82 @@ class EmailProcessor:
         with self._write_lock:
             # Reload dedup so we see any registrations made by parallel threads
             dedup = DedupManager(daily_folder)
-            if self._check_dup(
-                dedup, msg, folder_name, parsed.so_don, att_filenames, "nghiệp vụ", log, result
-            ):
-                return
+            if not _redownload:
+                skip2, _redownload2 = self._check_dup(
+                    dedup, msg, folder_name, parsed.so_don, att_filenames, "nghiệp vụ", log, result
+                )
+                if skip2:
+                    return
+                if _redownload2:
+                    _redownload = True
 
             if file_had_error:
                 result.file_error_count += 1
+
+            if _redownload:
+                # Files were missing — re-downloaded successfully.
+                # Update dedup record with fresh parse data, then rebuild entire Excel.
+                log(f"  ↳ ↻ Đã tải lại {len(att_filenames)} file → gen lại Excel toàn bộ")
+
+                # Build Lỗi string same way as _write_results
+                missing_fields: List[str] = []
+                if not parsed.so_cong_van_num:
+                    missing_fields.append("Thiếu số công văn")
+                if not parsed.issue_date:
+                    missing_fields.append("Thiếu ngày issue công văn")
+                if parsed.deadline_months is None and parsed.loai_cong_van not in ("TB0DL", "CNĐ"):
+                    missing_fields.append("Thiếu số tháng deadline")
+                if not parsed.loai_cong_van:
+                    missing_fields.append("Không khớp rule phân loại")
+                loi_str: Optional[str] = None
+                if missing_fields:
+                    loi_str = "\n".join(f"{i}: {e}" for i, e in enumerate(missing_fields, start=1))
+                if parsed.is_scan:
+                    loi_str = ("File scan, please check again\n" + (loi_str or "")).strip()
+                highlight_red = bool(missing_fields)
+
+                # Look up original seq from existing dedup record
+                existing_rec = dedup._records.get(msg.id)
+                redownload_seq = existing_rec.excel_seq if existing_rec else None
+
+                dedup.register(
+                    message_id=msg.id,
+                    internet_message_id=msg.internet_message_id,
+                    date_folder=folder_name,
+                    so_don=parsed.so_don,
+                    attachment_filenames=att_filenames,
+                    download_url=portal_url,
+                    run_status=status,
+                    excel_seq=redownload_seq,
+                    excel_recv_date=existing_rec.excel_recv_date if existing_rec else None,
+                    excel_so_cong_van_num=parsed.so_cong_van_num,
+                    excel_loai_cong_van=parsed.loai_cong_van,
+                    excel_issue_date_iso=parsed.issue_date.isoformat() if parsed.issue_date else None,
+                    excel_deadline_months=parsed.deadline_months,
+                    excel_so_don=parsed.so_don,
+                    excel_nhan_hieu=parsed.nhan_hieu,
+                    excel_loi=loi_str,
+                    excel_is_scan=parsed.is_scan,
+                    excel_highlight_red=highlight_red,
+                )
+
+                # Rebuild entire Excel from all records
+                writer = ExcelWriter(daily_folder, cfg.output.excel_filename)
+                for _attempt in range(2):
+                    try:
+                        dedup.rebuild_excel(writer)
+                        break
+                    except ExcelLockedError as exc:
+                        if _attempt == 0 and self._on_excel_locked:
+                            should_retry = self._on_excel_locked(exc.excel_path)
+                            if not should_retry:
+                                raise ScanCancelledError("Người dùng hủy quét do file Excel đang mở") from exc
+                            writer = ExcelWriter(daily_folder, cfg.output.excel_filename)
+                        else:
+                            raise
+
+                self._record_outcome(status, notes, parsed, log, result, used_fallback)
+                return
 
             # Get per-day sequence number, rename files, then write
             writer = ExcelWriter(daily_folder, cfg.output.excel_filename)
@@ -304,7 +357,7 @@ class EmailProcessor:
             # Write with optional retry when Excel is locked
             for _attempt in range(2):
                 try:
-                    self._write_results(msg, parsed, daily_folder, folder_name, att_filenames, status, notes, dedup, writer=writer, seq=seq, result=result)
+                    self._write_results(msg, parsed, daily_folder, folder_name, att_filenames, status, notes, dedup, writer=writer, seq=seq, result=result, portal_url=portal_url)
                     break  # success
                 except ExcelLockedError as exc:
                     if _attempt == 0 and self._on_excel_locked:
@@ -328,18 +381,28 @@ class EmailProcessor:
         label: str,
         log: Callable[[str], None],
         result: ProcessResult,
-    ) -> bool:
-        is_dup, reason = dedup.is_duplicate(
+    ) -> Tuple[bool, bool]:
+        """Returns (skip, needs_redownload).
+
+        skip=True, needs_redownload=False  → email already processed, skip entirely
+        skip=False, needs_redownload=True  → email processed but files missing, re-download only
+        skip=False, needs_redownload=False → new email, process fully
+        """
+        dup = dedup.is_duplicate(
             message_id=msg.id,
             internet_message_id=msg.internet_message_id,
             date_folder=folder_name,
             so_don=so_don,
             attachment_filenames=att_filenames,
         )
-        if is_dup:
-            log(f"  ↳ Bỏ qua (trùng {label}): {reason}")
+        if dup.is_dup and not dup.needs_redownload:
+            log(f"  ↳ Bỏ qua (trùng {label}): {dup.reason}")
             result.duplicate_count += 1
-        return is_dup
+            return True, False
+        if dup.needs_redownload:
+            log(f"  ↳ File bị xóa ({label}): {dup.reason} — sẽ tải lại")
+            return False, True
+        return False, False
 
     @staticmethod
     def _record_outcome(
@@ -355,6 +418,9 @@ class EmailProcessor:
         if status == _STATUS_REVIEW:
             log(f"  ↳ ⚠ Cần kiểm tra: {'; '.join(notes)}")
             result.review_count += 1
+        elif parsed.is_scan:
+            log(f"  ↳ ⚠ File scan (OCR)  số đơn={parsed.so_don or '?'}  loại={parsed.loai_cong_van or '?'}")
+            result.scan_count += 1
         else:
             log(f"  ↳ ✓ OK  số đơn={parsed.so_don or '?'}  loại={parsed.loai_cong_van or '?'}")
             result.success_count += 1
@@ -368,7 +434,7 @@ class EmailProcessor:
         daily_folder: Path,
         cfg: AppConfig,
         log: Callable,
-    ) -> Tuple[List[str], List[Path], List[str], str]:
+    ) -> Tuple[List[str], List[Path], List[str], str, Optional[str]]:
         """
         Acquire document files for an email using the portal-first strategy.
 
@@ -378,7 +444,8 @@ class EmailProcessor:
           3. Neither available → empty list, mark as Cần kiểm tra
 
         Returns:
-            (att_filenames, downloaded_paths, notes, status)
+            (att_filenames, downloaded_paths, notes, status, portal_url)
+            portal_url is the URL used for download (None if direct attachments or no URL found)
         """
         notes: List[str] = []
         status = _STATUS_OK
@@ -410,7 +477,7 @@ class EmailProcessor:
                     notes.append(f"{file_count} files từ portal — cần xác nhận file chính")
                     if cfg.processing.strict_single_attachment:
                         status = _STATUS_REVIEW
-                return att_filenames, downloaded_paths, notes, status
+                return att_filenames, downloaded_paths, notes, status, portal_url
 
             # Portal download failed
             notes.append(f"Tải từ portal thất bại: {portal_url}")
@@ -423,7 +490,7 @@ class EmailProcessor:
         # ── Strategy 2: Direct email attachments (fallback) ────────────────
         if not cfg.portal.fallback_to_attachments:
             status = _STATUS_REVIEW
-            return [], [], notes, status
+            return [], [], notes, status, portal_url
 
         if msg.has_attachments:
             attachments = att_downloader.list_attachments(msg.id)
@@ -441,12 +508,12 @@ class EmailProcessor:
             else:
                 notes.append("Dùng attachment trực tiếp (không có link portal)")
 
-            return att_filenames, downloaded_paths, notes, status
+            return att_filenames, downloaded_paths, notes, status, portal_url
 
         # ── No files available ─────────────────────────────────────────────
         notes.append("Không tải được file (không có portal link và không có attachment)")
         status = _STATUS_REVIEW
-        return [], [], notes, status
+        return [], [], notes, status, portal_url
 
     def _write_results(
         self,
@@ -461,6 +528,7 @@ class EmailProcessor:
         writer: Optional[ExcelWriter] = None,
         seq: Optional[int] = None,
         result: Optional["ProcessResult"] = None,
+        portal_url: Optional[str] = None,
     ) -> None:
         """Write Excel rows and register dedup record.
 
@@ -546,7 +614,19 @@ class EmailProcessor:
             date_folder=folder_name,
             so_don=parsed.so_don,
             attachment_filenames=att_filenames,
+            download_url=portal_url,
             run_status=status,
+            excel_seq=seq,
+            excel_recv_date=recv_date_str,
+            excel_so_cong_van_num=parsed.so_cong_van_num,
+            excel_loai_cong_van=parsed.loai_cong_van,
+            excel_issue_date_iso=parsed.issue_date.isoformat() if parsed.issue_date else None,
+            excel_deadline_months=parsed.deadline_months,
+            excel_so_don=parsed.so_don,
+            excel_nhan_hieu=parsed.nhan_hieu,
+            excel_loi=row.get("Lỗi"),
+            excel_is_scan=parsed.is_scan,
+            excel_highlight_red=highlight_red,
         )
 
 
