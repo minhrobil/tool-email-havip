@@ -150,12 +150,28 @@ class BrowserDownloader:
             if candidate.exists():
                 driver = candidate
 
+        cmd: List[str] = [str(driver), "install", "chromium"] if driver else ["playwright", "install", "chromium"]
+        logger.info("Đang cài Playwright Chromium: %s", " ".join(str(c) for c in cmd))
+
         try:
-            cmd = [str(driver), "install", "chromium"] if driver else ["playwright", "install", "chromium"]
-            logger.info("Chạy: %s", " ".join(str(c) for c in cmd))
-            subprocess.run(cmd, check=True, timeout=300)
+            # shell=True required on Windows for .cmd files; capture stderr for logging
+            result_proc = subprocess.run(
+                cmd,
+                check=True,
+                timeout=300,
+                shell=True,       # needed for .cmd files on Windows
+                capture_output=True,
+                text=True,
+            )
+            if result_proc.stdout:
+                for line in result_proc.stdout.strip().splitlines():
+                    logger.info("[playwright] %s", line)
             logger.info("Đã cài Playwright Chromium thành công")
             return True
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            logger.error("Lệnh cài Chromium thất bại (exit %d): %s", exc.returncode, stderr or exc)
+            return False
         except Exception as exc:
             logger.error("Không thể cài Playwright Chromium tự động: %s", exc)
             return False
@@ -264,10 +280,17 @@ class BrowserDownloader:
                     logger.info("Cài Chromium xong — thử lại tải file...")
                     return _launch_and_download()
                 else:
+                    import sys
+                    if getattr(sys, "frozen", False):
+                        driver_path = Path(sys._MEIPASS) / "playwright" / "driver" / "playwright.cmd"
+                        manual_cmd = f'  "{driver_path}" install chromium'
+                    else:
+                        manual_cmd = "  playwright install chromium"
                     raise RuntimeError(
                         "Không thể cài Playwright Chromium tự động.\n"
-                        "Vui lòng chạy lệnh sau rồi khởi động lại ứng dụng:\n"
-                        "  playwright install chromium"
+                        "Vui lòng mở Command Prompt (cmd) và chạy lệnh sau,\n"
+                        "rồi khởi động lại ứng dụng:\n"
+                        f"{manual_cmd}"
                     ) from exc
             raise
 
