@@ -64,6 +64,7 @@ class ProcessResult:
     file_error_count: int = 0   # emails where file download/acquisition failed
     missing_data_count: int = 0 # emails with missing required fields (red rows in Excel)
     fallback_count: int = 0      # emails saved to Desktop fallback (network was down)
+    downloaded_file_count: int = 0  # actual files saved to disk this scan
     total_emails: int = 0
     errors: List[str] = field(default_factory=list)
     start_time: datetime = field(default_factory=datetime.now)
@@ -131,6 +132,7 @@ class EmailProcessor:
                 "missing_data": result.missing_data_count,
                 "dup":          result.duplicate_count,
                 "error":        result.error_count,
+                "downloaded":   result.downloaded_file_count,
             }
 
         def log(msg: str, cur: int = 0, tot: int = 0) -> None:
@@ -348,6 +350,7 @@ class EmailProcessor:
                             raise
 
                 self._record_outcome(status, notes, parsed, log, result, used_fallback)
+                result.downloaded_file_count += len(att_filenames)
                 return
 
             # Get per-day sequence number, rename files, then write
@@ -632,6 +635,8 @@ class EmailProcessor:
             excel_is_scan=parsed.is_scan,
             excel_highlight_red=highlight_red,
         )
+        if result is not None:
+            result.downloaded_file_count += len(att_filenames)
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────

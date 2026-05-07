@@ -1079,7 +1079,7 @@ class CongVanApp(tk.Tk):
             # Dashboard: live counts during scan (no base accumulation)
             self._dash_found[1].set(str(total))
             self._dash_processing[1].set(str(total - current + 1))
-            self._dash_done[1].set(str(current - 1))
+            self._dash_done[1].set(str(stats.get("downloaded", 0)) if stats else "0")
 
         if stats:
             self._stat_ok[1].set(str(stats.get("success", 0)))
@@ -1127,7 +1127,7 @@ class CongVanApp(tk.Tk):
         # Dashboard final values
         self._dash_found[1].set(str(total))
         self._dash_processing[1].set("0")
-        self._dash_done[1].set(str(extracted))
+        self._dash_done[1].set(str(result.downloaded_file_count))
 
         # Update baseline so subsequent scans also accumulate correctly
         self._base_stats = {
