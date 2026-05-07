@@ -558,13 +558,13 @@ def parse_document(
     result.noi_dung_cong_van = extract_noi_dung(combined)
     result.nhan_hieu      = extract_nhan_hieu(combined)
 
-    # For scanned PDFs: if so_don couldn't be read from text, extract from filename
+    # For scanned PDFs: always use filename as so_don (more reliable than OCR text)
     # Pattern: {seq}-[{so_don}]-... e.g. "1-[GH4-2026-00466]-154-ONLI-2026-156666_signed.pdf"
-    if result.so_don is None and is_scan and pdf_path is not None:
+    if is_scan and pdf_path is not None:
         m = re.search(r"\[([^\]]+)\]", pdf_path.name)
         if m:
             result.so_don = m.group(1)
-            logger.debug("so_don extracted from filename: %s → %s", pdf_path.name, result.so_don)
+            logger.debug("so_don from filename (OCR): %s → %s", pdf_path.name, result.so_don)
 
     return result
 
