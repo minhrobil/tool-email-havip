@@ -5,14 +5,10 @@ Storage: each daily folder contains _processed.json that records every
 email processed in that folder.  The manager is scoped to ONE daily folder.
 
 Layered dedup check (priority order):
-  1. internetMessageId  — most reliable; globally unique per RFC 2822
-  2. Graph message id   — Graph-internal; stable within a mailbox
-  3. Downloaded filename — sole business key; unique per portal document
-
-The tool is idempotent: running it multiple times in one day never creates
-duplicate rows because:
-  - Step 1/2 catches the same email object
-  - Step 3 catches the same portal document even if message id changed
+  1. Portal URL       — primary business key; same URL = same document, skip download
+  2. internetMessageId — fallback for emails without portal URL (RFC 2822)
+  3. Graph message id  — fallback when internetMessageId unavailable
+  4. Downloaded filename — post-download safety net for parallel threads
 
 is_duplicate() is called BEFORE writing to Excel.
 register()     is called AFTER a successful write.
@@ -86,9 +82,11 @@ class DedupManager:
         self._output_folder = daily_folder
         self._records: Dict[str, DedupRecord] = {}   # keyed by message_id
         self._tech_keys: Set[str] = set()            # message_id + internet_message_id
-        self._business_keys: Set[str] = set()        # date_folder|so_don, date_folder|filename
+        self._business_keys: Set[str] = set()        # downloaded filenames
+        self._url_keys: Set[str] = set()             # portal URLs
         self._id_by_tech_key: Dict[str, str] = {}    # tech_key → message_id
-        self._id_by_bkey: Dict[str, str] = {}        # bkey → message_id
+        self._id_by_bkey: Dict[str, str] = {}        # filename → message_id
+        self._id_by_url: Dict[str, str] = {}         # portal_url → message_id
         self._load()
 
     # ── Public ─────────────────────────────────────────────────────────────
@@ -100,6 +98,7 @@ class DedupManager:
         date_folder: str,
         so_don: Optional[str] = None,
         attachment_filenames: Optional[List[str]] = None,
+        portal_url: Optional[str] = None,
     ) -> DupCheckResult:
         """
         Check whether this email was already processed in this daily folder.
@@ -112,16 +111,22 @@ class DedupManager:
         matched_rec: Optional[DedupRecord] = None
         reason = ""
 
-        # 1. internet_message_id (RFC 2822, most reliable)
-        if internet_message_id and internet_message_id in self._tech_keys:
-            matched_rec = self._records.get(self._id_by_tech_key.get(internet_message_id, ""))
-            reason = f"internetMessageId match: {internet_message_id[:40]}"
+        # 1. Portal URL — primary business key (same link = same document)
+        if portal_url and portal_url in self._url_keys:
+            matched_rec = self._records.get(self._id_by_url.get(portal_url, ""))
+            reason = f"portal URL: {portal_url}"
 
-        # 2. Graph message id
+        # 2. internet_message_id (RFC 2822) — fallback for emails without portal URL
+        if matched_rec is None and internet_message_id and internet_message_id in self._tech_keys:
+            matched_rec = self._records.get(self._id_by_tech_key.get(internet_message_id, ""))
+            reason = f"internetMessageId: {internet_message_id[:40]}"
+
+        # 3. Graph message id
         if matched_rec is None and message_id in self._tech_keys:
             matched_rec = self._records.get(message_id)
-            reason = f"message_id match: {message_id[:20]}…"
+            reason = f"message_id: {message_id[:20]}…"
 
+        # 4. Downloaded filename — post-download safety net
         if matched_rec is None:
             for fn in (attachment_filenames or []):
                 if fn in self._business_keys:
@@ -324,6 +329,9 @@ class DedupManager:
         for fn in rec.attachment_filenames:
             self._business_keys.add(fn)
             self._id_by_bkey[fn] = rec.message_id
+        if rec.download_url:
+            self._url_keys.add(rec.download_url)
+            self._id_by_url[rec.download_url] = rec.message_id
 
     def _save(self) -> None:
         # self._file already points to ~/.tool_mail_cong_van/<date>/_processed.json

@@ -247,11 +247,21 @@ class EmailProcessor:
             log(f"  ⚠ Thư mục output không khả dụng → lưu vào Desktop: {daily_folder}")
         folder_name = get_date_folder_name(msg.received_datetime, cfg.output.date_folder_format)
 
-        # ── Pre-dedup: quick technical check before expensive download ──────
+        # Extract portal URL early — used as primary dedup key before any download
+        portal_url_preview = extract_first_portal_url(
+            body_html=msg.body_html,
+            body_text=msg.body_text or msg.body_preview,
+            url_patterns=cfg.portal.url_patterns,
+        )
+
+        # ── Pre-dedup: check URL + technical keys before expensive download ──
         # (runs under lock so duplicate_count stays thread-safe)
         with self._write_lock:
             dedup = DedupManager(daily_folder)
-            skip, _redownload = self._check_dup(dedup, msg, folder_name, None, None, "kỹ thuật", log, result)
+            skip, _redownload = self._check_dup(
+                dedup, msg, folder_name, None, None, "kỹ thuật", log, result,
+                portal_url=portal_url_preview,
+            )
             if skip:
                 return
 
@@ -388,6 +398,7 @@ class EmailProcessor:
         label: str,
         log: Callable[[str], None],
         result: ProcessResult,
+        portal_url: Optional[str] = None,
     ) -> Tuple[bool, bool]:
         """Returns (skip, needs_redownload).
 
@@ -401,6 +412,7 @@ class EmailProcessor:
             date_folder=folder_name,
             so_don=so_don,
             attachment_filenames=att_filenames,
+            portal_url=portal_url,
         )
         if dup.is_dup and not dup.needs_redownload:
             log(f"  ↳ Bỏ qua (trùng {label}): {dup.reason}")
