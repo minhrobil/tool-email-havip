@@ -26,7 +26,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,47 @@ class BrowserDownloader:
 
     # ── Private ────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _ensure_chromium() -> bool:
+        """Auto-install Playwright Chromium browser if the executable is missing.
+
+        Works for both source runs (playwright in PATH) and PyInstaller frozen
+        executables (playwright driver bundled in _MEIPASS).
+
+        Returns True if Chromium is available (or was just installed), False otherwise.
+        """
+        import subprocess
+        import sys
+
+        # Check if executable already exists
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                if Path(p.chromium.executable_path).exists():
+                    return True
+                missing_path = p.chromium.executable_path
+        except Exception:
+            missing_path = "(unknown)"
+
+        logger.warning("Playwright Chromium không tìm thấy tại %s — đang cài tự động...", missing_path)
+
+        # Locate playwright driver: bundled in PyInstaller _MEIPASS or system PATH
+        driver: Optional[Path] = None
+        if getattr(sys, "frozen", False):
+            candidate = Path(sys._MEIPASS) / "playwright" / "driver" / "playwright.cmd"
+            if candidate.exists():
+                driver = candidate
+
+        try:
+            cmd = [str(driver), "install", "chromium"] if driver else ["playwright", "install", "chromium"]
+            logger.info("Chạy: %s", " ".join(str(c) for c in cmd))
+            subprocess.run(cmd, check=True, timeout=300)
+            logger.info("Đã cài Playwright Chromium thành công")
+            return True
+        except Exception as exc:
+            logger.error("Không thể cài Playwright Chromium tự động: %s", exc)
+            return False
+
     def _run(
         self,
         url: str,
@@ -128,87 +169,107 @@ class BrowserDownloader:
     ) -> List[Path]:
         from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-        downloads_received = []
-        saved: List[Path] = []
+        def _launch_and_download() -> List[Path]:
+            downloads_received = []
+            saved: List[Path] = []
 
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self._headless)
-            context = browser.new_context(accept_downloads=True)
-            page = context.new_page()
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=self._headless)
+                context = browser.new_context(accept_downloads=True)
+                page = context.new_page()
 
-            # Capture every download that the page triggers
-            page.on("download", lambda d: downloads_received.append(d))
+                # Capture every download that the page triggers
+                page.on("download", lambda d: downloads_received.append(d))
 
-            # ── Navigate ───────────────────────────────────────────────────
-            logger.info("Mở portal: %s", url)
-            try:
-                page.goto(url, timeout=self._page_load_timeout, wait_until="networkidle")
-            except PWTimeout:
-                logger.warning("Page load timed out — proceeding anyway: %s", url)
+                # ── Navigate ───────────────────────────────────────────────────
+                logger.info("Mở portal: %s", url)
                 try:
-                    page.wait_for_load_state("domcontentloaded", timeout=5000)
-                except Exception:
-                    pass
+                    page.goto(url, timeout=self._page_load_timeout, wait_until="networkidle")
+                except PWTimeout:
+                    logger.warning("Page load timed out — proceeding anyway: %s", url)
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception:
+                        pass
 
-            page_title = (page.title() or "")[:80]
-            logger.info("Trang đã tải: %s", page_title)
+                page_title = (page.title() or "")[:80]
+                logger.info("Trang đã tải: %s", page_title)
 
-            if _is_error_page(page):
-                result.notes.append(f"Trang portal trả về lỗi (title='{page_title}')")
-                browser.close()
-                return []
+                if _is_error_page(page):
+                    result.notes.append(f"Trang portal trả về lỗi (title='{page_title}')")
+                    browser.close()
+                    return []
 
-            # ── Enter access code if provided ──────────────────────────────
-            if access_code:
-                self._enter_access_code(page, access_code, result)
+                # ── Enter access code if provided ──────────────────────────────
+                if access_code:
+                    self._enter_access_code(page, access_code, result)
 
-            # ── Strategy 1: "Tải tất cả" bulk download button ─────────────
-            button_clicked = self._click_download_button(page)
-            if button_clicked:
-                page.wait_for_timeout(self._wait_after_click)
-
-            # ── Strategy 2: individual file-item links (fallback) ──────────
-            if not downloads_received:
+                # ── Strategy 1: "Tải tất cả" bulk download button ─────────────
+                button_clicked = self._click_download_button(page)
                 if button_clicked:
-                    logger.info("Nút tải đã click nhưng không có file — thử tải từng file")
-                else:
-                    logger.info("Không tìm thấy nút 'Tải tất cả' — thử tải từng file")
-
-                items_clicked = self._click_file_items(page, result)
-                if items_clicked:
                     page.wait_for_timeout(self._wait_after_click)
 
-            # ── Nothing worked ─────────────────────────────────────────────
-            if not downloads_received:
-                if button_clicked and items_clicked:
-                    result.notes.append("Đã thử nút tải và tải từng file nhưng không nhận được file nào")
-                elif button_clicked:
-                    result.notes.append("Nút tải đã được nhấn nhưng không có file nào được tải xuống")
-                elif items_clicked:
-                    result.notes.append("Thử tải từng file riêng lẻ nhưng không nhận được file nào")
-                else:
-                    result.notes.append("Không tìm thấy nút tải và không tìm thấy link file riêng lẻ trên trang portal")
+                # ── Strategy 2: individual file-item links (fallback) ──────────
+                items_clicked = False
+                if not downloads_received:
+                    if button_clicked:
+                        logger.info("Nút tải đã click nhưng không có file — thử tải từng file")
+                    else:
+                        logger.info("Không tìm thấy nút 'Tải tất cả' — thử tải từng file")
+
+                    items_clicked = self._click_file_items(page, result)
+                    if items_clicked:
+                        page.wait_for_timeout(self._wait_after_click)
+
+                # ── Nothing worked ─────────────────────────────────────────────
+                if not downloads_received:
+                    if button_clicked and items_clicked:
+                        result.notes.append("Đã thử nút tải và tải từng file nhưng không nhận được file nào")
+                    elif button_clicked:
+                        result.notes.append("Nút tải đã được nhấn nhưng không có file nào được tải xuống")
+                    elif items_clicked:
+                        result.notes.append("Thử tải từng file riêng lẻ nhưng không nhận được file nào")
+                    else:
+                        result.notes.append("Không tìm thấy nút tải và không tìm thấy link file riêng lẻ trên trang portal")
+                    browser.close()
+                    return []
+
+                # ── Save downloads (must happen BEFORE browser.close()) ────────
+                for dl in downloads_received:
+                    filename = _sanitize(dl.suggested_filename or "download")
+                    dest = _unique_path(target_folder, filename)
+                    try:
+                        dl.save_as(str(dest))   # blocks until download completes
+                        saved.append(dest)
+                        logger.info(
+                            "  Đã tải: %-40s  (%s bytes)",
+                            dest.name, f"{dest.stat().st_size:,}",
+                        )
+                    except Exception as exc:
+                        logger.error("Không lưu được file '%s': %s", filename, exc)
+                        result.notes.append(f"Lỗi lưu: {filename} — {exc}")
+
                 browser.close()
-                return []
 
-            # ── Save downloads (must happen BEFORE browser.close()) ────────
-            for dl in downloads_received:
-                filename = _sanitize(dl.suggested_filename or "download")
-                dest = _unique_path(target_folder, filename)
-                try:
-                    dl.save_as(str(dest))   # blocks until download completes
-                    saved.append(dest)
-                    logger.info(
-                        "  Đã tải: %-40s  (%s bytes)",
-                        dest.name, f"{dest.stat().st_size:,}",
-                    )
-                except Exception as exc:
-                    logger.error("Không lưu được file '%s': %s", filename, exc)
-                    result.notes.append(f"Lỗi lưu: {filename} — {exc}")
+            return saved
 
-            browser.close()
-
-        return saved
+        # ── First attempt ──────────────────────────────────────────────────────
+        try:
+            return _launch_and_download()
+        except Exception as exc:
+            # Detect missing Chromium executable and auto-install, then retry once
+            if "Executable doesn't exist" in str(exc) or "executable doesn't exist" in str(exc):
+                logger.warning("Chromium chưa được cài — thử cài tự động...")
+                if self._ensure_chromium():
+                    logger.info("Cài Chromium xong — thử lại tải file...")
+                    return _launch_and_download()
+                else:
+                    raise RuntimeError(
+                        "Không thể cài Playwright Chromium tự động.\n"
+                        "Vui lòng chạy lệnh sau rồi khởi động lại ứng dụng:\n"
+                        "  playwright install chromium"
+                    ) from exc
+            raise
 
     def _enter_access_code(self, page, access_code: str, result: PortalDownloadResult) -> bool:
         """
