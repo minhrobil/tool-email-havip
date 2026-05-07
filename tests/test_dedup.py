@@ -54,13 +54,12 @@ class TestDedupManagerFreshFolder:
         assert result.is_dup is True
         assert "internetMessageId" in result.reason
 
-    def test_register_and_detect_by_so_don(self, tmp_path):
+    def test_so_don_no_longer_a_dedup_key(self, tmp_path):
         mgr = make_manager(tmp_path)
         mgr.register("msg1", None, "26.04.14", so_don="4-2025-001")
-        # Different technical keys, same so_don
+        # Same so_don but different message — should NOT be dup (so_don removed as key)
         result = mgr.is_duplicate("msg2", "imid2", "26.04.14", so_don="4-2025-001")
-        assert result.is_dup is True
-        assert "so_don" in result.reason
+        assert result.is_dup is False
 
     def test_register_and_detect_by_filename(self, tmp_path):
         mgr = make_manager(tmp_path)

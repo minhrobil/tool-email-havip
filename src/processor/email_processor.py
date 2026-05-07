@@ -273,7 +273,7 @@ class EmailProcessor:
             dedup = DedupManager(daily_folder)
             if not _redownload:
                 skip2, _redownload2 = self._check_dup(
-                    dedup, msg, folder_name, parsed.so_don, att_filenames, "nghiệp vụ", log, result
+                    dedup, msg, folder_name, None, att_filenames, "filename", log, result
                 )
                 if skip2:
                     # Clean up files downloaded in the parallel phase — they are orphans

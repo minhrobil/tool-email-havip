@@ -7,13 +7,12 @@ email processed in that folder.  The manager is scoped to ONE daily folder.
 Layered dedup check (priority order):
   1. internetMessageId  — most reliable; globally unique per RFC 2822
   2. Graph message id   — Graph-internal; stable within a mailbox
-  3. Business key: date_folder + so_don
-  4. Business key: date_folder + attachment_filename
+  3. Downloaded filename — sole business key; unique per portal document
 
 The tool is idempotent: running it multiple times in one day never creates
 duplicate rows because:
   - Step 1/2 catches the same email object
-  - Step 3/4 catches structurally equivalent records even if message id changed
+  - Step 3 catches the same portal document even if message id changed
 
 is_duplicate() is called BEFORE writing to Excel.
 register()     is called AFTER a successful write.
@@ -123,20 +122,11 @@ class DedupManager:
             matched_rec = self._records.get(message_id)
             reason = f"message_id match: {message_id[:20]}…"
 
-        # 3. Business key: folder + so_don
-        if matched_rec is None and so_don:
-            bk = _bkey(date_folder, so_don)
-            if bk in self._business_keys:
-                matched_rec = self._records.get(self._id_by_bkey.get(bk, ""))
-                reason = f"business key (so_don): {bk}"
-
-        # 4. Business key: folder + attachment filename
         if matched_rec is None:
             for fn in (attachment_filenames or []):
-                bk = _bkey(date_folder, fn)
-                if bk in self._business_keys:
-                    matched_rec = self._records.get(self._id_by_bkey.get(bk, ""))
-                    reason = f"business key (filename): {bk}"
+                if fn in self._business_keys:
+                    matched_rec = self._records.get(self._id_by_bkey.get(fn, ""))
+                    reason = f"filename: {fn}"
                     break
 
         if matched_rec is None:
@@ -332,9 +322,8 @@ class DedupManager:
             self._business_keys.add(bk)
             self._id_by_bkey[bk] = rec.message_id
         for fn in rec.attachment_filenames:
-            bk = _bkey(rec.date_folder, fn)
-            self._business_keys.add(bk)
-            self._id_by_bkey[bk] = rec.message_id
+            self._business_keys.add(fn)
+            self._id_by_bkey[fn] = rec.message_id
 
     def _save(self) -> None:
         # self._file already points to ~/.tool_mail_cong_van/<date>/_processed.json
