@@ -376,18 +376,64 @@ class CongVanApp(tk.Tk):
             font=(_FONT, 8), bg=_CARD_BG, fg=_TEXT_MUTED,
         ).pack(side=tk.LEFT)
 
-        # Row 1 — mail folder
-        _lbl("Thư mục mail:", 1)
+        # Row 1 — search mode + folder/sender
+        _lbl("Tìm email:", 1)
+        search_row = tk.Frame(g, bg=_CARD_BG)
+        search_row.grid(row=1, column=1, sticky="ew", pady=4)
+
+        self._search_mode_var = tk.StringVar(value="folder")
+
+        rb_folder = tk.Radiobutton(
+            search_row, text="Theo thư mục",
+            variable=self._search_mode_var, value="folder",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT,
+            activebackground=_CARD_BG, selectcolor=_CARD_BG,
+            cursor="hand2", command=self._on_search_mode_change,
+        )
+        rb_folder.pack(side=tk.LEFT, padx=(0, 8))
+
+        rb_sender = tk.Radiobutton(
+            search_row, text="Theo người gửi",
+            variable=self._search_mode_var, value="sender",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT,
+            activebackground=_CARD_BG, selectcolor=_CARD_BG,
+            cursor="hand2", command=self._on_search_mode_change,
+        )
+        rb_sender.pack(side=tk.LEFT)
+
+        # Row 1b — folder name entry
+        self._folder_row_frame = tk.Frame(g, bg=_CARD_BG)
+        self._folder_row_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(0, 0))
+        tk.Label(
+            self._folder_row_frame, text="Thư mục mail:",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, width=14, anchor="e",
+        ).pack(side=tk.LEFT, padx=(0, 8))
         self._mail_folder_var = tk.StringVar(value="Công văn")
         self._mail_folder_entry = ttk.Entry(
-            g, textvariable=self._mail_folder_var, font=(_FONT, 9), width=24,
+            self._folder_row_frame, textvariable=self._mail_folder_var,
+            font=(_FONT, 9), width=24,
         )
-        self._mail_folder_entry.grid(row=1, column=1, sticky="w", pady=4)
+        self._mail_folder_entry.pack(side=tk.LEFT)
 
-        # Row 2 — export folder
-        _lbl("Export vào:", 2)
+        # Row 1c — sender email entry
+        self._sender_row_frame = tk.Frame(g, bg=_CARD_BG)
+        self._sender_row_frame.grid(row=3, column=0, columnspan=2, sticky="ew")
+        tk.Label(
+            self._sender_row_frame, text="Email người gửi:",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, width=14, anchor="e",
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        self._sender_email_var = tk.StringVar(value="cucsohuutritue@ipvietnam.gov.vn")
+        self._sender_email_entry = ttk.Entry(
+            self._sender_row_frame, textvariable=self._sender_email_var,
+            font=(_FONT, 9), width=30,
+        )
+        self._sender_email_entry.pack(side=tk.LEFT)
+        self._sender_row_frame.grid_remove()  # hidden by default
+
+        # Row 4 — export folder
+        _lbl("Export vào:", 4)
         export_row = tk.Frame(g, bg=_CARD_BG)
-        export_row.grid(row=2, column=1, sticky="ew", pady=4)
+        export_row.grid(row=4, column=1, sticky="ew", pady=4)
         export_row.columnconfigure(0, weight=1)
 
         self._export_folder_var = tk.StringVar(value=_DEFAULT_EXPORT)
@@ -404,10 +450,10 @@ class CongVanApp(tk.Tk):
         )
         self._choose_folder_btn.grid(row=0, column=1)
 
-        # Row 3 — auto-scan
-        _lbl("Tự động quét:", 3)
+        # Row 5 — auto-scan
+        _lbl("Tự động quét:", 5)
         auto_cells = tk.Frame(g, bg=_CARD_BG)
-        auto_cells.grid(row=3, column=1, sticky="w", pady=4)
+        auto_cells.grid(row=5, column=1, sticky="w", pady=4)
 
         self._auto_scan_var = tk.BooleanVar(value=True)
         self._auto_scan_cb = tk.Checkbutton(
@@ -608,6 +654,9 @@ class CongVanApp(tk.Tk):
             )
             # Sync mail folder field with loaded config
             self._mail_folder_var.set(self._config.mail.target_folder_name)
+            self._search_mode_var.set(self._config.mail.search_mode)
+            self._sender_email_var.set(self._config.mail.sender_email)
+            self._on_search_mode_change()
         except (FileNotFoundError, ValueError) as exc:
             self._show_login()
             self._login_status.config(
@@ -709,6 +758,15 @@ class CongVanApp(tk.Tk):
             )
             return None, None
         return d_from, d_to
+
+    def _on_search_mode_change(self) -> None:
+        mode = self._search_mode_var.get()
+        if mode == "folder":
+            self._folder_row_frame.grid()
+            self._sender_row_frame.grid_remove()
+        else:
+            self._folder_row_frame.grid_remove()
+            self._sender_row_frame.grid()
 
     def _do_choose_folder(self) -> None:
         folder = filedialog.askdirectory(
@@ -877,11 +935,18 @@ class CongVanApp(tk.Tk):
         output_folder = self._export_folder_var.get().strip() or _DEFAULT_EXPORT
         self._last_export_folder = output_folder
 
-        # Apply runtime mail folder override
+        # Apply runtime mail search mode override
         if self._config:
-            folder_name = self._mail_folder_var.get().strip()
-            if folder_name:
-                self._config.mail.target_folder_name = folder_name
+            mode = self._search_mode_var.get()
+            self._config.mail.search_mode = mode
+            if mode == "folder":
+                folder_name = self._mail_folder_var.get().strip()
+                if folder_name:
+                    self._config.mail.target_folder_name = folder_name
+            else:
+                sender = self._sender_email_var.get().strip()
+                if sender:
+                    self._config.mail.sender_email = sender
 
         # ── Pre-scan: close any open Excel export files first ─────────────────
         excel_filename = self._config.output.excel_filename
@@ -1205,6 +1270,7 @@ class CongVanApp(tk.Tk):
         self._from_date_entry.config(state=state_entry)
         self._to_date_entry.config(state=state_entry)
         self._mail_folder_entry.config(state=state_entry)
+        self._sender_email_entry.config(state=state_entry)
         self._auto_scan_freq_cb.config(state=state_combo)
         self._auto_scan_cb.config(state=state_btn)
 

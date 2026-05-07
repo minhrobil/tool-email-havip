@@ -212,22 +212,32 @@ class EmailProcessor:
         )
 
         target = self._cfg.mail.target_folder_name
-        log(f"Đang tìm thư mục '{target}'...")
-        folder = reader.find_cong_van_folder(target)
-        if folder is None:
-            _fail(result, (
-                f"Không tìm thấy thư mục '{target}' trong hộp thư. "
-                "Kiểm tra 'mail.target_folder_name' trong config.json."
-            ))
-            return [], None, None, True
+        search_mode = self._cfg.mail.search_mode
 
-        log(f"Đã tìm thấy: '{folder.display_name}'")
-        log("Đang tải danh sách email...")
-        messages = reader.get_messages(
-            folder.id,
-            received_after=date_from,
-            received_before=date_to,
-        )
+        if search_mode == "sender":
+            sender = self._cfg.mail.sender_email
+            log(f"Đang tìm email từ '{sender}' trong hộp thư đến...")
+            messages = reader.get_messages_by_sender(
+                sender,
+                received_after=date_from,
+                received_before=date_to,
+            )
+        else:
+            log(f"Đang tìm thư mục '{target}'...")
+            folder = reader.find_cong_van_folder(target)
+            if folder is None:
+                _fail(result, (
+                    f"Không tìm thấy thư mục '{target}' trong hộp thư. "
+                    "Kiểm tra 'mail.target_folder_name' trong config.json."
+                ))
+                return [], None, None, True
+
+            log(f"Đã tìm thấy: '{folder.display_name}'")
+            messages = reader.get_messages(
+                folder.id,
+                received_after=date_from,
+                received_before=date_to,
+            )
         return messages, att_downloader, browser_dl, False
 
     # ── Per-message pipeline ───────────────────────────────────────────────

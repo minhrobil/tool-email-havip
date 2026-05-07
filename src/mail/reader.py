@@ -186,6 +186,44 @@ class MailReader:
         logger.info("Đã tải %d email từ thư mục.", len(messages))
         return messages
 
+    def get_messages_by_sender(
+        self,
+        sender_email: str,
+        received_after: Optional[datetime] = None,
+        received_before: Optional[datetime] = None,
+    ) -> List[MailMessage]:
+        """
+        Retrieve messages from Inbox filtered by sender email address.
+        Used as fallback when folder-based search fails.
+        """
+        select_fields = ",".join([
+            "id", "internetMessageId", "subject",
+            "sender", "receivedDateTime",
+            "hasAttachments", "bodyPreview",
+            "body",
+        ])
+        filter_parts: List[str] = [
+            f"sender/emailAddress/address eq '{sender_email}'"
+        ]
+        if received_after:
+            filter_parts.append(f"receivedDateTime ge {_to_utc_str(received_after)}")
+        if received_before:
+            filter_parts.append(f"receivedDateTime le {_to_utc_str(received_before)}")
+
+        params: Dict[str, Any] = {
+            "$select": select_fields,
+            "$top": self._page_size,
+            "$orderby": "receivedDateTime desc",
+            "$filter": " and ".join(filter_parts),
+        }
+
+        messages: List[MailMessage] = []
+        for raw in self._client.paginate("/me/mailFolders/inbox/messages", params=params):
+            messages.append(_raw_to_message(raw))
+
+        logger.info("Đã tải %d email từ sender '%s'.", len(messages), sender_email)
+        return messages
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
