@@ -527,6 +527,14 @@ class CongVanApp(tk.Tk):
             relief=tk.FLAT, padx=8, pady=3, cursor="hand2", bd=0,
         ).pack(side=tk.RIGHT)
 
+        tk.Button(
+            hdr, text="🗑 Clear processed",
+            command=self._clear_processed,
+            font=(_FONT, 8), bg=_BORDER, fg=_TEXT_MUTED,
+            activebackground=_RED, activeforeground=_WHITE,
+            relief=tk.FLAT, padx=8, pady=3, cursor="hand2", bd=0,
+        ).pack(side=tk.RIGHT, padx=(0, 6))
+
         self._log_text = scrolledtext.ScrolledText(
             outer, state=tk.DISABLED,
             font=("Consolas", 8), bg="#F8F9FA", fg=_TEXT,
@@ -593,6 +601,28 @@ class CongVanApp(tk.Tk):
             self._log_text.config(state=tk.DISABLED)
         except Exception:
             pass
+
+    def _clear_processed(self) -> None:
+        tool_root = Path.home() / ".tool_mail_cong_van"
+        files = list(tool_root.rglob("_processed.json")) if tool_root.exists() else []
+        if not files:
+            messagebox.showinfo("Clear processed", "Không có file _processed.json nào.")
+            return
+        msg = f"Xóa {len(files)} file _processed.json?\n\n" + "\n".join(str(f) for f in files)
+        if not messagebox.askyesno("Xác nhận", msg):
+            return
+        deleted, errors = 0, []
+        for f in files:
+            try:
+                f.unlink()
+                deleted += 1
+            except OSError as e:
+                errors.append(f"{f.name}: {e}")
+        summary = f"Đã xóa {deleted}/{len(files)} file."
+        if errors:
+            summary += "\nLỗi:\n" + "\n".join(errors)
+        messagebox.showinfo("Clear processed", summary)
+        self._append_log(f"[Clear processed] {summary}")
 
     # ═══════════════════════════════════════════════════════════════════════
     # INIT / ROUTING
