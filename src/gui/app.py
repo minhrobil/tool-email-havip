@@ -381,7 +381,7 @@ class CongVanApp(tk.Tk):
         search_row = tk.Frame(g, bg=_CARD_BG)
         search_row.grid(row=1, column=1, sticky="ew", pady=4)
 
-        self._search_mode_var = tk.StringVar(value="folder")
+        self._search_mode_var = tk.StringVar(value="sender")
 
         rb_folder = tk.Radiobutton(
             search_row, text="Theo thư mục",
@@ -401,34 +401,35 @@ class CongVanApp(tk.Tk):
         )
         rb_sender.pack(side=tk.LEFT)
 
-        # Row 1b — folder name entry
-        self._folder_row_frame = tk.Frame(g, bg=_CARD_BG)
-        self._folder_row_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=(0, 0))
-        tk.Label(
-            self._folder_row_frame, text="Thư mục mail:",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, width=14, anchor="e",
-        ).pack(side=tk.LEFT, padx=(0, 8))
+        # Row 2 — folder name entry (show/hide via grid)
+        self._folder_lbl = tk.Label(
+            g, text="Thư mục mail:",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, anchor="e",
+        )
+        self._folder_lbl.grid(row=2, column=0, sticky="e", padx=(0, 8), pady=2)
         self._mail_folder_var = tk.StringVar(value="Công văn")
         self._mail_folder_entry = ttk.Entry(
-            self._folder_row_frame, textvariable=self._mail_folder_var,
-            font=(_FONT, 9), width=24,
+            g, textvariable=self._mail_folder_var, font=(_FONT, 9), width=24,
         )
-        self._mail_folder_entry.pack(side=tk.LEFT)
+        self._mail_folder_entry.grid(row=2, column=1, sticky="w", pady=2)
 
-        # Row 1c — sender email entry
-        self._sender_row_frame = tk.Frame(g, bg=_CARD_BG)
-        self._sender_row_frame.grid(row=3, column=0, columnspan=2, sticky="ew")
-        tk.Label(
-            self._sender_row_frame, text="Email người gửi:",
-            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, width=14, anchor="e",
-        ).pack(side=tk.LEFT, padx=(0, 8))
+        # Row 3 — sender email entry (show/hide via grid)
+        self._sender_lbl = tk.Label(
+            g, text="Email người gửi:",
+            font=(_FONT, 9), bg=_CARD_BG, fg=_TEXT, anchor="e",
+        )
+        self._sender_lbl.grid(row=3, column=0, sticky="e", padx=(0, 8), pady=2)
         self._sender_email_var = tk.StringVar(value="cucsohuutritue@ipvietnam.gov.vn")
         self._sender_email_entry = ttk.Entry(
-            self._sender_row_frame, textvariable=self._sender_email_var,
-            font=(_FONT, 9), width=30,
+            g, textvariable=self._sender_email_var, font=(_FONT, 9), width=30,
         )
-        self._sender_email_entry.pack(side=tk.LEFT)
-        self._sender_row_frame.grid_remove()  # hidden by default
+        self._sender_email_entry.grid(row=3, column=1, sticky="w", pady=2)
+        # Hide folder row by default (sender is default mode)
+        self._folder_lbl.grid_remove()
+        self._mail_folder_entry.grid_remove()
+        # Hide sender row initially — _on_search_mode_change will show correct one
+        self._sender_lbl.grid_remove()
+        self._sender_email_entry.grid_remove()
 
         # Row 4 — export folder
         _lbl("Export vào:", 4)
@@ -762,11 +763,15 @@ class CongVanApp(tk.Tk):
     def _on_search_mode_change(self) -> None:
         mode = self._search_mode_var.get()
         if mode == "folder":
-            self._folder_row_frame.grid()
-            self._sender_row_frame.grid_remove()
+            self._folder_lbl.grid()
+            self._mail_folder_entry.grid()
+            self._sender_lbl.grid_remove()
+            self._sender_email_entry.grid_remove()
         else:
-            self._folder_row_frame.grid_remove()
-            self._sender_row_frame.grid()
+            self._folder_lbl.grid_remove()
+            self._mail_folder_entry.grid_remove()
+            self._sender_lbl.grid()
+            self._sender_email_entry.grid()
 
     def _do_choose_folder(self) -> None:
         folder = filedialog.askdirectory(

@@ -32,7 +32,7 @@ class MailConfig:
     target_folder_name: str = "Công văn"
     page_size: int = 50
     # "folder" = tìm theo thư mục (mặc định), "sender" = tìm theo người gửi trong Inbox
-    search_mode: str = "folder"
+    search_mode: str = "sender"
     sender_email: str = "cucsohuutritue@ipvietnam.gov.vn"
 
 
@@ -137,7 +137,7 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
     mail = MailConfig(
         target_folder_name=mail_raw.get("target_folder_name", "Công văn"),
         page_size=int(mail_raw.get("page_size", 50)),
-        search_mode=mail_raw.get("search_mode", "folder"),
+        search_mode=mail_raw.get("search_mode", "sender"),
         sender_email=mail_raw.get("sender_email", "cucsohuutritue@ipvietnam.gov.vn"),
     )
 

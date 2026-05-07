@@ -213,13 +213,17 @@ class MailReader:
         params: Dict[str, Any] = {
             "$select": select_fields,
             "$top": self._page_size,
-            "$orderby": "receivedDateTime desc",
+            # Note: $orderby cannot be combined with $filter on messages without
+            # ConsistencyLevel header — sort in Python instead
             "$filter": " and ".join(filter_parts),
         }
 
         messages: List[MailMessage] = []
         for raw in self._client.paginate("/me/mailFolders/inbox/messages", params=params):
             messages.append(_raw_to_message(raw))
+
+        # Sort newest first (mirrors folder-based behaviour)
+        messages.sort(key=lambda m: m.received_datetime, reverse=True)
 
         logger.info("Đã tải %d email từ sender '%s'.", len(messages), sender_email)
         return messages
