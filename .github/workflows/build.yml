@@ -64,6 +64,21 @@ jobs:
           copy packaging\windows\run_headless.dist.bat dist\ToolXuLyMailCongVan\run_headless.bat
           copy packaging\windows\setup_scheduler.dist.bat dist\ToolXuLyMailCongVan\setup_scheduler.bat
 
+      - name: Bundle Playwright Chromium into dist
+        shell: pwsh
+        run: |
+          $dest = "dist\ToolXuLyMailCongVan\_internal\playwright\driver\package\.local-browsers"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $msPlaywright = "$env:LOCALAPPDATA\ms-playwright"
+          $copied = 0
+          foreach ($dir in Get-ChildItem $msPlaywright -Directory | Where-Object { $_.Name -like "chromium_headless_shell-*" }) {
+            Write-Host "Copying $($dir.Name)..."
+            Copy-Item -Path $dir.FullName -Destination "$dest\$($dir.Name)" -Recurse -Force
+            $copied++
+          }
+          if ($copied -eq 0) { Write-Warning "No chromium_headless_shell found in $msPlaywright" }
+          else { Write-Host "Chromium bundled OK ($copied folder(s))" }
+
       - name: Zip dist folder
         run: Compress-Archive -Path dist\ToolXuLyMailCongVan\* -DestinationPath ToolXuLyMailCongVan-windows.zip
 
