@@ -2,7 +2,7 @@
   "_comment": "Cong Van Processor - Configuration file. Edit this file to match your environment.",
   "azure": {
     "_comment_client_id": "Register an Azure App: https://portal.azure.com -> App registrations -> New. Platform: Mobile/Desktop, Redirect URI: http://localhost",
-    "client_id": "YOUR_CLIENT_ID_HERE",
+    "client_id": "eca42d04-276c-4437-9168-f0af2b63b2da",
     "tenant_id": "common",
     "authority": "https://login.microsoftonline.com/common",
     "scopes": [
@@ -38,8 +38,8 @@
       "a:has-text('Tải xuống tất cả')",
       "[class*='download-all']"
     ],
-    "page_load_timeout_ms": 30000,
-    "wait_after_click_ms": 8000,
+    "page_load_timeout_ms": 300000,
+    "wait_after_click_ms": 80000,
     "headless": true,
     "fallback_to_attachments": true,
     "parallel_downloads": 5
