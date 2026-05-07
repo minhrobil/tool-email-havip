@@ -77,26 +77,40 @@ if %errorlevel% equ 0 (
     copy /y "packaging\windows\run_headless.dist.bat" "dist\ToolXuLyMailCongVan\run_headless.bat" > nul
     copy /y "packaging\windows\setup_scheduler.dist.bat" "dist\ToolXuLyMailCongVan\setup_scheduler.bat" > nul
 
+    :: ── Bundle Playwright Chromium browser into the dist folder ──────────────
+    :: Playwright (frozen EXE) looks for browsers in:
+    ::   _internal\playwright\driver\package\.local-browsers\
+    :: Copy from already-installed ms-playwright to avoid re-downloading.
     echo.
-    echo ✅ Build successful!
+    echo Bundling Playwright Chromium into dist...
+    set "BROWSERS_DEST=dist\ToolXuLyMailCongVan\_internal\playwright\driver\package\.local-browsers"
+    if not exist "%BROWSERS_DEST%" mkdir "%BROWSERS_DEST%"
+
+    set "COPIED=0"
+    for /d %%D in ("%LOCALAPPDATA%\ms-playwright\chromium_headless_shell-*") do (
+        echo   Copying %%~nxD ^(~265 MB^)...
+        xcopy /E /I /Y /Q "%%D" "%BROWSERS_DEST%\%%~nxD" > nul
+        set "COPIED=1"
+    )
+    if "%COPIED%"=="0" (
+        echo   [WARNING] Chromium headless shell not found in %%LOCALAPPDATA%%\ms-playwright\
+        echo   Users will need to install manually.
+    ) else (
+        echo   [OK] Chromium bundled.
+    )
+
+    echo.
+    echo Build successful!
     echo.
     echo   Executable : dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe
     echo   Scheduler  : dist\ToolXuLyMailCongVan\setup_scheduler.bat
     echo.
-    echo IMPORTANT: Playwright Chromium must also be available on the target machine.
-    echo   Option A: Run 'playwright install chromium' on the target machine.
-    echo   Option B: Copy the Chromium folder from %%LOCALAPPDATA%%\ms-playwright\
-    echo             to the same path on the target machine.
+    echo Deployment: Copy entire dist\ToolXuLyMailCongVan\ folder to target machine.
+    echo             Chromium is bundled -- no additional setup needed.
     echo.
-    echo Deployment steps:
-    echo   1. Copy the entire dist\ToolXuLyMailCongVan\ folder to the target machine
-    echo   2. Edit config.json with the correct Azure client_id and folder paths
-    echo   3. Install Playwright browser on target machine (see above)
-    echo   4. Double-click ToolXuLyMailCongVan.exe to launch
-    echo   5. Run setup_scheduler.bat inside dist\ToolXuLyMailCongVan\ if you need Task Scheduler
 ) else (
     echo.
-    echo ❌ Build failed. Check error messages above.
+    echo Build failed. Check error messages above.
 )
 
 pause
