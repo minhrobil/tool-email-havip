@@ -274,6 +274,10 @@ class EmailProcessor:
                     dedup, msg, folder_name, parsed.so_don, att_filenames, "nghiệp vụ", log, result
                 )
                 if skip2:
+                    # Clean up files downloaded in the parallel phase — they are orphans
+                    # because another thread already processed this email. Without cleanup
+                    # the daily folder would accumulate more files than emails.
+                    _delete_paths(downloaded_paths, log)
                     return
                 if _redownload2:
                     _redownload = True
@@ -696,6 +700,21 @@ def _find_main_pdf(paths: List[Path]) -> Optional[Path]:
     if len(pdfs) == 1:
         return pdfs[0]
     return max(pdfs, key=lambda p: p.stat().st_size)
+
+
+def _delete_paths(paths: List[Path], log: Callable[[str], None]) -> None:
+    """Delete downloaded files that turned out to be business duplicates.
+
+    Keeps the daily folder clean: number of files on disk never exceeds
+    the number of distinct emails for that day.
+    """
+    for p in paths:
+        try:
+            if p.exists():
+                p.unlink()
+                logger.debug("Deleted orphan file (business dup): %s", p.name)
+        except OSError as exc:
+            logger.warning("Cannot delete orphan file %s: %s", p.name, exc)
 
 
 def _log_run_summary(

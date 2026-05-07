@@ -894,10 +894,8 @@ class CongVanApp(tk.Tk):
 
         # ── Start scan thread ─────────────────────────────────────────────────
         self._running = True
-        # Reset only the progress bar/label — stat cards keep pre-loaded values
-        self._step_var.set("Đang kết nối…")
-        self._pct_var.set("")
-        self._progress_bar["value"] = 0
+        # Reset all stats and progress before each scan
+        self._reset_progress()
         self._set_scan_state(False)
         start_msg = f"▶ Bắt đầu quét  {date_from.strftime('%d/%m/%Y %H:%M')} → {date_to.strftime('%d/%m/%Y %H:%M')}"
         logger.info(start_msg)
@@ -1078,27 +1076,19 @@ class CongVanApp(tk.Tk):
                 f"{total} email tìm thấy  •  {success} thành công  •  {error} lỗi"
             )
 
-            # Dashboard: show pre-loaded + current scan counts (subtract duplicates so found stays unique)
-            base_total = self._base_stats.get("total", 0)
-            base_done  = self._base_stats.get("success", 0) + self._base_stats.get("file_err", 0) + self._base_stats.get("scan", 0)
-            dup_so_far = stats.get("dup", 0) if stats else 0
-            self._dash_found[1].set(str(base_total + total - dup_so_far))
+            # Dashboard: live counts during scan (no base accumulation)
+            self._dash_found[1].set(str(total))
             self._dash_processing[1].set(str(total - current + 1))
-            self._dash_done[1].set(str(base_done + current - 1))
-        elif not is_sub_message:
-            # Setup phase — reset bar but keep any subtitle already set
-            self._progress_bar["value"] = 0
-            self._pct_var.set("")
+            self._dash_done[1].set(str(current - 1))
 
         if stats:
-            b = self._base_stats
-            scan    = b.get("scan", 0) + stats.get("scan", 0)
-            f_err   = b.get("file_err", 0) + stats.get("file_err", 0)
-            self._stat_ok[1].set(str(b.get("success", 0) + stats.get("success", 0)))
-            self._stat_file_err[1].set(str(f_err))
+            self._stat_ok[1].set(str(stats.get("success", 0)))
+            self._stat_file_err[1].set(str(stats.get("file_err", 0)))
+            scan  = stats.get("scan", 0)
+            f_err = stats.get("file_err", 0)
             self._stat_scan[1].set(str(scan))
             self._stat_read_err[1].set(str(scan + f_err))
-            self._stat_dup[1].set(str(b.get("dup", 0) + stats.get("dup", 0)))
+            self._stat_dup[1].set(str(stats.get("dup", 0)))
 
     def _on_scan_done(self, result: ProcessResult) -> None:
         total = result.total_emails
@@ -1127,22 +1117,17 @@ class CongVanApp(tk.Tk):
             f"{result.error_count} lỗi"
         )
 
-        # Stat cards: accumulate scan result on top of pre-loaded baseline
-        b = self._base_stats
-        scan  = b.get("scan", 0) + result.scan_count
-        f_err = b.get("file_err", 0) + result.file_error_count
-        self._stat_ok[1].set(str(b.get("success", 0) + result.success_count))
-        self._stat_file_err[1].set(str(f_err))
-        self._stat_scan[1].set(str(scan))
-        self._stat_read_err[1].set(str(scan + f_err))
-        self._stat_dup[1].set(str(b.get("dup", 0) + result.duplicate_count))
+        # Stat cards: set directly from this scan's result (no base accumulation)
+        self._stat_ok[1].set(str(result.success_count))
+        self._stat_file_err[1].set(str(result.file_error_count))
+        self._stat_scan[1].set(str(result.scan_count))
+        self._stat_read_err[1].set(str(result.scan_count + result.file_error_count))
+        self._stat_dup[1].set(str(result.duplicate_count))
 
         # Dashboard final values
-        base_total = b.get("total", 0)
-        base_done  = b.get("success", 0) + b.get("file_err", 0) + b.get("scan", 0)
-        self._dash_found[1].set(str(base_total + total - result.duplicate_count))
+        self._dash_found[1].set(str(total))
         self._dash_processing[1].set("0")
-        self._dash_done[1].set(str(base_done + extracted))
+        self._dash_done[1].set(str(extracted))
 
         # Update baseline so subsequent scans also accumulate correctly
         self._base_stats = {
