@@ -48,16 +48,17 @@ class TestRenameDownloadedFiles:
         assert "3-doc1.pdf" in new_names
         assert "3-doc2.xlsx" in new_names
 
-    def test_seq_suffix_avoids_collision(self, tmp_path):
-        # If 3-file.pdf already exists, should use 3-file_1.pdf
+    def test_seq_overwrites_existing(self, tmp_path):
+        # If 3-file.pdf already exists it must be removed and replaced (overwrite, no _1 suffix)
         existing = tmp_path / "3-file.pdf"
-        existing.write_bytes(b"existing")
+        existing.write_bytes(b"old")
         f = tmp_path / "file.pdf"
         f.write_bytes(b"new")
 
         _, new_names = _rename_downloaded_files([f], seq=3)
 
-        assert new_names == ["3-file_1.pdf"]
+        assert new_names == ["3-file.pdf"]
+        assert (tmp_path / "3-file.pdf").read_bytes() == b"new"
 
     def test_skips_missing_file(self, tmp_path):
         ghost = tmp_path / "ghost.pdf"  # does not exist

@@ -253,6 +253,8 @@ class EmailProcessor:
             body_text=msg.body_text or msg.body_preview,
             url_patterns=cfg.portal.url_patterns,
         )
+        if not portal_url_preview:
+            log(f"  ⚠ Email không có link portal — sẽ xử lý nhưng không dedup qua URL")
 
         # ── Pre-dedup: check URL + technical keys before expensive download ──
         # (runs under lock so duplicate_count stays thread-safe)
@@ -325,7 +327,6 @@ class EmailProcessor:
 
                 dedup.register(
                     message_id=msg.id,
-                    internet_message_id=msg.internet_message_id,
                     date_folder=folder_name,
                     so_don=parsed.so_don,
                     attachment_filenames=att_filenames,
@@ -408,7 +409,6 @@ class EmailProcessor:
         """
         dup = dedup.is_duplicate(
             message_id=msg.id,
-            internet_message_id=msg.internet_message_id,
             date_folder=folder_name,
             so_don=so_don,
             attachment_filenames=att_filenames,
@@ -620,7 +620,6 @@ class EmailProcessor:
         writer.append_data_row(row, highlight_red=highlight_red, highlight_yellow=parsed.is_scan)
         writer.append_meta_row({
             "message_id":           msg.id,
-            "internet_message_id":  msg.internet_message_id or "",
             "date_folder":          folder_name,
             "so_don":               parsed.so_don or "",
             "attachment_filenames": "; ".join(att_filenames),
@@ -629,7 +628,6 @@ class EmailProcessor:
         })
         dedup.register(
             message_id=msg.id,
-            internet_message_id=msg.internet_message_id,
             date_folder=folder_name,
             so_don=parsed.so_don,
             attachment_filenames=att_filenames,
@@ -667,6 +665,7 @@ def _rename_downloaded_files(
 ) -> Tuple[List[Path], List[str]]:
     """
     Rename each downloaded file to {seq}-{original_name}.
+    If the target already exists it is removed first (overwrite semantics).
     Falls back to the original name on OS error.
     Returns (new_path_list, new_filename_list).
     """
@@ -679,11 +678,13 @@ def _rename_downloaded_files(
         new_name = _make_seq_filename(seq, path.stem, path.suffix)
         new_path = path.parent / new_name
 
-        # Avoid clobbering an unrelated file with the same target name
-        counter = 1
-        while new_path.exists() and new_path.resolve() != path.resolve():
-            new_path = path.parent / f"{seq}-{path.stem}_{counter}{path.suffix}"
-            counter += 1
+        # Remove stale file so the rename always uses the canonical seq-name
+        if new_path.exists() and new_path.resolve() != path.resolve():
+            try:
+                new_path.unlink()
+                logger.debug("Removed stale seq-file before rename: %s", new_path.name)
+            except OSError as exc:
+                logger.warning("Cannot remove stale seq-file %s: %s", new_path.name, exc)
 
         try:
             path.rename(new_path)

@@ -94,7 +94,6 @@ class DedupManager:
     def is_duplicate(
         self,
         message_id: str,
-        internet_message_id: Optional[str],
         date_folder: str,
         so_don: Optional[str] = None,
         attachment_filenames: Optional[List[str]] = None,
@@ -116,12 +115,7 @@ class DedupManager:
             matched_rec = self._records.get(self._id_by_url.get(portal_url, ""))
             reason = f"portal URL: {portal_url}"
 
-        # 2. internet_message_id (RFC 2822) — fallback for emails without portal URL
-        if matched_rec is None and internet_message_id and internet_message_id in self._tech_keys:
-            matched_rec = self._records.get(self._id_by_tech_key.get(internet_message_id, ""))
-            reason = f"internetMessageId: {internet_message_id[:40]}"
-
-        # 3. Graph message id
+        # 2. Graph message id — technical fallback
         if matched_rec is None and message_id in self._tech_keys:
             matched_rec = self._records.get(message_id)
             reason = f"message_id: {message_id[:20]}…"
@@ -166,7 +160,6 @@ class DedupManager:
     def register(
         self,
         message_id: str,
-        internet_message_id: Optional[str],
         date_folder: str,
         so_don: Optional[str] = None,
         attachment_filenames: Optional[List[str]] = None,
@@ -191,7 +184,7 @@ class DedupManager:
         """
         rec = DedupRecord(
             message_id=message_id,
-            internet_message_id=internet_message_id,
+            internet_message_id=None,
             date_folder=date_folder,
             so_don=so_don,
             attachment_filenames=attachment_filenames or [],
@@ -319,13 +312,6 @@ class DedupManager:
         self._records[rec.message_id] = rec
         self._tech_keys.add(rec.message_id)
         self._id_by_tech_key[rec.message_id] = rec.message_id
-        if rec.internet_message_id:
-            self._tech_keys.add(rec.internet_message_id)
-            self._id_by_tech_key[rec.internet_message_id] = rec.message_id
-        if rec.so_don:
-            bk = _bkey(rec.date_folder, rec.so_don)
-            self._business_keys.add(bk)
-            self._id_by_bkey[bk] = rec.message_id
         for fn in rec.attachment_filenames:
             self._business_keys.add(fn)
             self._id_by_bkey[fn] = rec.message_id
