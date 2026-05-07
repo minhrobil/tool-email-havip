@@ -253,7 +253,14 @@ class BrowserDownloader:
                 # ── Save downloads (must happen BEFORE browser.close()) ────────
                 for dl in downloads_received:
                     filename = _sanitize(dl.suggested_filename or "download")
-                    dest = _unique_path(target_folder, filename)
+                    dest = target_folder / filename
+                    # Remove stale file so the new download overwrites it cleanly
+                    if dest.exists():
+                        try:
+                            dest.unlink()
+                            logger.debug("Removed stale file before overwrite: %s", dest.name)
+                        except OSError as exc:
+                            logger.warning("Cannot remove stale file %s: %s", dest.name, exc)
                     try:
                         dl.save_as(str(dest))   # blocks until download completes
                         saved.append(dest)
