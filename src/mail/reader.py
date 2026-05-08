@@ -103,8 +103,8 @@ class MailReader:
         for raw in self._client.paginate("/me/messages", params=params):
             messages.append(_raw_to_message(raw))
 
-        # Sort newest first (mirrors folder-based behaviour)
-        messages.sort(key=lambda m: m.received_datetime, reverse=True)
+        # Sort oldest first so seq numbers assigned within a day are chronological
+        messages.sort(key=lambda m: m.received_datetime, reverse=False)
 
         logger.info("Đã tải %d email từ sender '%s'.", len(messages), sender_email)
         return messages
