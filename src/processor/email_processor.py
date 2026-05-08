@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -151,34 +150,24 @@ class EmailProcessor:
         log(f"Tìm thấy {len(messages)} email.")
 
         total = len(messages)
-        parallel = self._cfg.portal.parallel_downloads
 
-        def _run_one(idx: int, msg: "MailMessage") -> None:
+        # Process emails sequentially in sorted (oldest-first) order so that
+        # seq numbers assigned to filenames and Excel rows are chronological.
+        for idx, msg in enumerate(messages, start=1):
             log(f"Đang xử lý {idx}/{total}: {msg.subject}", idx, total)
-            self._process_one(msg, att_downloader, browser_dl, result, log)
-
-        with ThreadPoolExecutor(max_workers=parallel) as pool:
-            futures = {
-                pool.submit(_run_one, idx, msg): (idx, msg)
-                for idx, msg in enumerate(messages, start=1)
-            }
-            for fut in as_completed(futures):
-                idx, msg = futures[fut]
-                try:
-                    fut.result()
-                except ScanCancelledError:
-                    for f in futures:
-                        f.cancel()
-                    log("⛔ Quét bị hủy bởi người dùng.")
-                    result.end_time = datetime.now()
-                    return result
-                except Exception as exc:
-                    err = f"Lỗi xử lý email '{msg.subject[:50]}': {exc}"
-                    logger.error(err)
-                    logger.debug(traceback.format_exc())
-                    with self._write_lock:
-                        result.errors.append(err)
-                        result.error_count += 1
+            try:
+                self._process_one(msg, att_downloader, browser_dl, result, log)
+            except ScanCancelledError:
+                log("⛔ Quét bị hủy bởi người dùng.")
+                result.end_time = datetime.now()
+                return result
+            except Exception as exc:
+                err = f"Lỗi xử lý email '{msg.subject[:50]}': {exc}"
+                logger.error(err)
+                logger.debug(traceback.format_exc())
+                with self._write_lock:
+                    result.errors.append(err)
+                    result.error_count += 1
 
         result.end_time = datetime.now()
         log(result.summary())
