@@ -89,6 +89,34 @@ class ProcessResult:
         )
 
 
+# ── Deferred write record ──────────────────────────────────────────────────
+
+@dataclass
+class _PendingWrite:
+    """Carries all pre-computed data for a deferred, ordered Excel write.
+
+    Threads collect downloads + parsing results and populate this record
+    (under _write_lock).  After all threads finish, the main thread sorts
+    by (daily_folder, seq) and calls _do_excel_write() for each record,
+    guaranteeing that Excel rows are always appended in chronological seq order.
+    """
+    msg: "MailMessage"
+    parsed: "ParsedDocument"
+    daily_folder: Path
+    folder_name: str
+    att_filenames: List[str]
+    status: str
+    notes: List[str]
+    portal_url: Optional[str]
+    seq: int
+    used_fallback: bool
+    file_had_error: bool
+    row: Dict                      # pre-computed Excel row dict
+    recv_date_str: str             # formatted DD/MM/YYYY
+    highlight_red: bool
+    log_fn: Callable[[str], None]  # for _record_outcome
+
+
 # ── EmailProcessor ─────────────────────────────────────────────────────────
 
 class EmailProcessor:
@@ -158,10 +186,13 @@ class EmailProcessor:
         # This guarantees that oldest email of the day gets seq=1, next gets seq=2, etc.
         pre_seq = self._pre_assign_seq(messages)
 
-        def _run_one(idx: int, msg: "MailMessage") -> None:
+        # Collect deferred write records from threads; written in sorted order after pool.
+        pending_writes: List[_PendingWrite] = []
+
+        def _run_one(idx: int, msg: "MailMessage") -> Optional[_PendingWrite]:
             log(f"Đang xử lý {idx}/{total}: {msg.subject}", idx, total)
-            self._process_one(msg, att_downloader, browser_dl, result, log,
-                              pre_seq=pre_seq.get(msg.id))
+            return self._process_one(msg, att_downloader, browser_dl, result, log,
+                                     pre_seq=pre_seq.get(msg.id))
 
         with ThreadPoolExecutor(max_workers=parallel) as pool:
             futures = {
@@ -171,7 +202,9 @@ class EmailProcessor:
             for fut in as_completed(futures):
                 idx, msg = futures[fut]
                 try:
-                    fut.result()
+                    pw = fut.result()
+                    if pw is not None:
+                        pending_writes.append(pw)
                 except ScanCancelledError:
                     for f in futures:
                         f.cancel()
@@ -185,6 +218,27 @@ class EmailProcessor:
                     with self._write_lock:
                         result.errors.append(err)
                         result.error_count += 1
+
+        # Write Excel rows in sorted (seq) order — guarantees 1→N in the output file
+        pending_writes.sort(key=lambda pw: (str(pw.daily_folder), pw.seq))
+        for pw in pending_writes:
+            for _attempt in range(2):
+                try:
+                    self._do_excel_write(pw, result)
+                    break
+                except ExcelLockedError as exc:
+                    if _attempt == 0 and self._on_excel_locked:
+                        should_retry = self._on_excel_locked(exc.excel_path)
+                        if not should_retry:
+                            log("⛔ Quét bị hủy bởi người dùng.")
+                            result.end_time = datetime.now()
+                            return result
+                    else:
+                        raise
+                except ScanCancelledError:
+                    log("⛔ Quét bị hủy bởi người dùng.")
+                    result.end_time = datetime.now()
+                    return result
 
         result.end_time = datetime.now()
         log(result.summary())
@@ -292,7 +346,7 @@ class EmailProcessor:
         result: ProcessResult,
         log: Callable[[str], None],
         pre_seq: Optional[int] = None,
-    ) -> None:
+    ) -> Optional[_PendingWrite]:
         cfg = self._cfg
         root = self._output_folder_override or cfg.output.root_folder
         daily_folder, used_fallback = get_daily_folder(
@@ -354,10 +408,9 @@ class EmailProcessor:
                 if _redownload2:
                     _redownload = True
 
-            if file_had_error:
-                result.file_error_count += 1
-
             if _redownload:
+                if file_had_error:
+                    result.file_error_count += 1
                 # Files were missing — re-downloaded successfully.
                 # Update dedup record with fresh parse data, then rebuild entire Excel.
                 log(f"  ↳ ↻ Đã tải lại {len(att_filenames)} file → gen lại Excel toàn bộ")
@@ -423,29 +476,90 @@ class EmailProcessor:
                 return
 
             # Use pre-assigned seq (chronological) or fall back to next available
-            writer = ExcelWriter(daily_folder, cfg.output.excel_filename)
-            seq = pre_seq if pre_seq is not None else writer.next_sequence_number()
+            # Use pre-assigned seq (chronological) or fall back to next available
+            seq = pre_seq if pre_seq is not None else ExcelWriter(daily_folder, cfg.output.excel_filename).next_sequence_number()
             if downloaded_paths:
                 downloaded_paths, att_filenames = _rename_downloaded_files(
                     downloaded_paths, seq
                 )
 
-            # Write with optional retry when Excel is locked
-            for _attempt in range(2):
-                try:
-                    self._write_results(msg, parsed, daily_folder, folder_name, att_filenames, status, notes, dedup, writer=writer, seq=seq, result=result, portal_url=portal_url)
-                    break  # success
-                except ExcelLockedError as exc:
-                    if _attempt == 0 and self._on_excel_locked:
-                        should_retry = self._on_excel_locked(exc.excel_path)
-                        if not should_retry:
-                            raise ScanCancelledError("Người dùng hủy quét do file Excel đang mở") from exc
-                        writer = ExcelWriter(daily_folder, cfg.output.excel_filename)
-                    else:
-                        raise
+            # Compute row data (same logic as _write_results) so we can register
+            # dedup and return a _PendingWrite for sorted deferred Excel write.
+            recv_dt = msg.received_datetime.split("T")[0]
+            try:
+                from datetime import datetime as _dt
+                recv_date_str = _dt.strptime(recv_dt, "%Y-%m-%d").strftime("%d/%m/%Y")
+            except ValueError:
+                recv_date_str = recv_dt
 
-            _log_run_summary(msg, parsed, status, notes)
-            self._record_outcome(status, notes, parsed, log, result, used_fallback)
+            missing_fields_n: List[str] = []
+            if not parsed.so_cong_van_num:
+                missing_fields_n.append("Thiếu số công văn")
+            if not parsed.issue_date:
+                missing_fields_n.append("Thiếu ngày issue công văn")
+            if parsed.deadline_months is None and parsed.loai_cong_van not in ("TB0DL", "CNĐ"):
+                missing_fields_n.append("Thiếu số tháng deadline")
+            if not parsed.loai_cong_van:
+                missing_fields_n.append("Không khớp rule phân loại")
+
+            row: Dict = {
+                "Ngày nhận công văn":  seq,
+                "Số công văn":         parsed.so_cong_van_num or "",
+                "Loại công văn":       parsed.loai_cong_van or "",
+                "Ngày issue công văn": parsed.issue_date,
+                "Số tháng deadline":   parsed.deadline_months,
+                "Số đơn":              parsed.so_don or "",
+                "Loại hình đơn":       "",
+                "Nội dung công văn":   parsed.nhan_hieu or "",
+            }
+            if missing_fields_n:
+                row["Lỗi"] = "\n".join(f"{i}: {e}" for i, e in enumerate(missing_fields_n, start=1))
+            if parsed.is_scan:
+                existing_loi = row.get("Lỗi", "")
+                row["Lỗi"] = ("File scan, please check again\n" + existing_loi).strip() if existing_loi else "File scan, please check again"
+            highlight_red_n = bool(missing_fields_n)
+
+            # Register dedup NOW (under lock) so subsequent parallel threads see this
+            # message's filenames and can correctly skip duplicates.
+            dedup.register(
+                message_id=msg.id,
+                date_folder=folder_name,
+                so_don=parsed.so_don,
+                attachment_filenames=att_filenames,
+                download_url=portal_url,
+                run_status=status,
+                excel_seq=seq,
+                excel_recv_date=recv_date_str,
+                excel_so_cong_van_num=parsed.so_cong_van_num,
+                excel_loai_cong_van=parsed.loai_cong_van,
+                excel_issue_date_iso=parsed.issue_date.isoformat() if parsed.issue_date else None,
+                excel_deadline_months=parsed.deadline_months,
+                excel_so_don=parsed.so_don,
+                excel_nhan_hieu=parsed.nhan_hieu,
+                excel_loi=row.get("Lỗi"),
+                excel_is_scan=parsed.is_scan,
+                excel_highlight_red=highlight_red_n,
+            )
+
+            # Return pending write — Excel rows will be appended in sorted seq order
+            # by the main thread after all downloads complete (see run()).
+            return _PendingWrite(
+                msg=msg,
+                parsed=parsed,
+                daily_folder=daily_folder,
+                folder_name=folder_name,
+                att_filenames=att_filenames,
+                status=status,
+                notes=notes,
+                portal_url=portal_url,
+                seq=seq,
+                used_fallback=used_fallback,
+                file_had_error=file_had_error,
+                row=row,
+                recv_date_str=recv_date_str,
+                highlight_red=highlight_red_n,
+                log_fn=log,
+            )
 
     def _check_dup(
         self,
@@ -502,6 +616,32 @@ class EmailProcessor:
             log(f"  ↳ ✓ OK  số đơn={parsed.so_don or '?'}  loại={parsed.loai_cong_van or '?'}")
             result.success_count += 1
 
+    def _do_excel_write(self, pw: _PendingWrite, result: ProcessResult) -> None:
+        """Append Excel rows for a pending write record.
+
+        Called by the main thread (after all downloads) in sorted seq order,
+        guaranteeing that rows appear as 1→N in the output file regardless of
+        which thread finished first.
+        """
+        writer = ExcelWriter(pw.daily_folder, self._cfg.output.excel_filename)
+        if pw.seq == 1:
+            writer.append_date_row(pw.recv_date_str)
+        writer.append_data_row(pw.row, highlight_red=pw.highlight_red, highlight_yellow=pw.parsed.is_scan)
+        writer.append_meta_row({
+            "message_id":           pw.msg.id,
+            "date_folder":          pw.folder_name,
+            "so_don":               pw.parsed.so_don or "",
+            "attachment_filenames": "; ".join(pw.att_filenames),
+            "processed_at":         datetime.now().isoformat(timespec="seconds"),
+            "run_status":           pw.status,
+        })
+        if pw.file_had_error:
+            result.file_error_count += 1
+        if pw.highlight_red:
+            result.missing_data_count += 1
+        result.downloaded_file_count += len(pw.att_filenames)
+        _log_run_summary(pw.msg, pw.parsed, pw.status, pw.notes)
+        self._record_outcome(pw.status, pw.notes, pw.parsed, pw.log_fn, result, pw.used_fallback)
 
     def _acquire_files(
         self,
