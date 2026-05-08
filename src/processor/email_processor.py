@@ -19,10 +19,12 @@ from __future__ import annotations
 import logging
 import threading
 import traceback
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from ..auth.graph_auth import GraphAuth
 from ..config import AppConfig
@@ -150,24 +152,39 @@ class EmailProcessor:
         log(f"Tìm thấy {len(messages)} email.")
 
         total = len(messages)
+        parallel = self._cfg.portal.parallel_downloads
 
-        # Process emails sequentially in sorted (oldest-first) order so that
-        # seq numbers assigned to filenames and Excel rows are chronological.
-        for idx, msg in enumerate(messages, start=1):
+        # Pre-assign seq numbers in sorted order BEFORE parallel downloads begin.
+        # This guarantees that oldest email of the day gets seq=1, next gets seq=2, etc.
+        pre_seq = self._pre_assign_seq(messages)
+
+        def _run_one(idx: int, msg: "MailMessage") -> None:
             log(f"Đang xử lý {idx}/{total}: {msg.subject}", idx, total)
-            try:
-                self._process_one(msg, att_downloader, browser_dl, result, log)
-            except ScanCancelledError:
-                log("⛔ Quét bị hủy bởi người dùng.")
-                result.end_time = datetime.now()
-                return result
-            except Exception as exc:
-                err = f"Lỗi xử lý email '{msg.subject[:50]}': {exc}"
-                logger.error(err)
-                logger.debug(traceback.format_exc())
-                with self._write_lock:
-                    result.errors.append(err)
-                    result.error_count += 1
+            self._process_one(msg, att_downloader, browser_dl, result, log,
+                              pre_seq=pre_seq.get(msg.id))
+
+        with ThreadPoolExecutor(max_workers=parallel) as pool:
+            futures = {
+                pool.submit(_run_one, idx, msg): (idx, msg)
+                for idx, msg in enumerate(messages, start=1)
+            }
+            for fut in as_completed(futures):
+                idx, msg = futures[fut]
+                try:
+                    fut.result()
+                except ScanCancelledError:
+                    for f in futures:
+                        f.cancel()
+                    log("⛔ Quét bị hủy bởi người dùng.")
+                    result.end_time = datetime.now()
+                    return result
+                except Exception as exc:
+                    err = f"Lỗi xử lý email '{msg.subject[:50]}': {exc}"
+                    logger.error(err)
+                    logger.debug(traceback.format_exc())
+                    with self._write_lock:
+                        result.errors.append(err)
+                        result.error_count += 1
 
         result.end_time = datetime.now()
         log(result.summary())
@@ -214,6 +231,57 @@ class EmailProcessor:
         )
         return messages, att_downloader, browser_dl, False
 
+    def _pre_assign_seq(self, messages: List["MailMessage"]) -> Dict[str, int]:
+        """
+        Pre-assign chronological seq numbers to new (non-dup) messages BEFORE
+        parallel downloads begin. Messages must already be sorted oldest-first.
+
+        Returns {msg.id → seq} for emails that will need full processing.
+        Duplicate emails (by portal URL or message_id) are excluded.
+        """
+        cfg = self._cfg
+        root = self._output_folder_override or cfg.output.root_folder
+
+        # Group messages by day-folder, preserving sorted order
+        day_msgs: Dict[str, List["MailMessage"]] = defaultdict(list)
+        day_folder: Dict[str, Path] = {}
+
+        for msg in messages:
+            folder_name = get_date_folder_name(msg.received_datetime, cfg.output.date_folder_format)
+            if folder_name not in day_folder:
+                daily_folder, _ = get_daily_folder(
+                    msg.received_datetime, root,
+                    cfg.output.date_folder_format,
+                    cfg.output.fallback_output_folder,
+                )
+                day_folder[folder_name] = daily_folder
+            day_msgs[folder_name].append(msg)
+
+        pre_seq: Dict[str, int] = {}
+
+        for folder_name, msgs in day_msgs.items():
+            daily_folder = day_folder[folder_name]
+            writer = ExcelWriter(daily_folder, cfg.output.excel_filename)
+            seq = writer.next_sequence_number()
+            dedup = DedupManager(daily_folder)
+
+            for msg in msgs:  # already sorted oldest-first
+                portal_url = extract_first_portal_url(
+                    body_html=msg.body_html,
+                    body_text=msg.body_text or msg.body_preview,
+                    url_patterns=cfg.portal.url_patterns,
+                )
+                dup = dedup.is_duplicate(
+                    message_id=msg.id,
+                    date_folder=folder_name,
+                    portal_url=portal_url,
+                )
+                if not dup.is_dup:
+                    pre_seq[msg.id] = seq
+                    seq += 1
+
+        return pre_seq
+
     # ── Per-message pipeline ───────────────────────────────────────────────
 
     def _process_one(
@@ -223,6 +291,7 @@ class EmailProcessor:
         browser_dl: BrowserDownloader,
         result: ProcessResult,
         log: Callable[[str], None],
+        pre_seq: Optional[int] = None,
     ) -> None:
         cfg = self._cfg
         root = self._output_folder_override or cfg.output.root_folder
@@ -353,9 +422,9 @@ class EmailProcessor:
                 result.downloaded_file_count += len(att_filenames)
                 return
 
-            # Get per-day sequence number, rename files, then write
+            # Use pre-assigned seq (chronological) or fall back to next available
             writer = ExcelWriter(daily_folder, cfg.output.excel_filename)
-            seq = writer.next_sequence_number()
+            seq = pre_seq if pre_seq is not None else writer.next_sequence_number()
             if downloaded_paths:
                 downloaded_paths, att_filenames = _rename_downloaded_files(
                     downloaded_paths, seq
