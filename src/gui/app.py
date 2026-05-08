@@ -52,7 +52,7 @@ _GREEN      = "#27AE60"
 _ORANGE     = "#E67E22"
 _RED        = "#E74C3C"
 _FONT       = "Segoe UI"
-_VERSION    = "2.0"
+_VERSION    = __version__
 
 # Disabled button appearance — neutral gray so text is still legible
 _DISABLED_BG = "#9CA3AF"
@@ -1108,9 +1108,7 @@ class CongVanApp(tk.Tk):
 
             success = stats.get("success", 0) if stats else 0
             error   = stats.get("error",   0) if stats else 0
-            self._pct_var.set(
-                f"{total} email tìm thấy  •  {success} thành công  •  {error} lỗi"
-            )
+            self._pct_var.set(f"{pct}%")
 
             # Dashboard: live counts during scan (no base accumulation)
             self._dash_found[1].set(str(total))
@@ -1147,11 +1145,7 @@ class CongVanApp(tk.Tk):
             self._step_var.set(msg)
             self._append_log(msg)
 
-        self._pct_var.set(
-            f"{total} email tìm thấy  •  "
-            f"{result.success_count} thành công  •  "
-            f"{result.error_count} lỗi"
-        )
+        self._pct_var.set("")
 
         # Stat cards: set directly from this scan's result (no base accumulation)
         self._stat_ok[1].set(str(result.success_count))

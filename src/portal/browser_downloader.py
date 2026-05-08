@@ -48,8 +48,11 @@ class BrowserDownloader:
     def __init__(
         self,
         button_selectors: List[str],
-        page_load_timeout_ms: int = 30000,
-        wait_after_click_ms: int = 8000,
+        page_load_timeout_ms: int = 60000,
+        wait_after_click_ms: int = 15000,
+        pre_click_wait_ms: int = 3000,
+        retry_count: int = 3,
+        retry_delay_ms: int = 4000,
         headless: bool = True,
     ):
         """
@@ -59,6 +62,10 @@ class BrowserDownloader:
             page_load_timeout_ms:  Max ms to wait for the page to reach networkidle.
             wait_after_click_ms:   How long to wait after clicking for downloads to
                                    start (and complete for small files).
+            pre_click_wait_ms:     Extra wait after networkidle before looking for buttons
+                                   — gives JS time to render dynamic content.
+            retry_count:           Number of download attempts before giving up.
+            retry_delay_ms:        Wait between retry attempts.
             headless:              Run Chromium in headless mode (True for production).
         """
         self._selectors = button_selectors or [
@@ -70,6 +77,9 @@ class BrowserDownloader:
         ]
         self._page_load_timeout = page_load_timeout_ms
         self._wait_after_click = wait_after_click_ms
+        self._pre_click_wait = pre_click_wait_ms
+        self._retry_count = max(1, retry_count)
+        self._retry_delay = retry_delay_ms
         self._headless = headless
 
     # ── Public ─────────────────────────────────────────────────────────────
@@ -104,16 +114,54 @@ class BrowserDownloader:
 
         target_folder.mkdir(parents=True, exist_ok=True)
 
-        try:
-            saved = self._run(portal_url, target_folder, result, access_code)
-            result.downloaded_paths = saved
-            result.success = bool(saved)
-        except Exception as exc:
-            logger.error("Browser download failed for %s: %s", portal_url, exc)
-            result.notes.append(f"Lỗi tải file từ portal: {exc}")
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, self._retry_count + 1):
+            if attempt > 1:
+                logger.info("  ↳ Retry lần %d/%d cho: %s", attempt, self._retry_count, portal_url)
+                # Brief pause before retry so the portal has time to recover
+                import time as _time
+                _time.sleep(self._retry_delay / 1000)
+            try:
+                saved = self._run(portal_url, target_folder, result, access_code)
+                if saved:
+                    result.downloaded_paths = saved
+                    result.success = True
+                    return result
+                # _run returned empty — clear notes and retry
+                if attempt < self._retry_count:
+                    result.notes.clear()
+                    logger.info("  Portal trả về 0 file (lần %d) — thử lại...", attempt)
+            except Exception as exc:
+                last_exc = exc
+                # Detect missing Chromium and auto-install once, then break retry loop
+                if "Executable doesn't exist" in str(exc) or "executable doesn't exist" in str(exc):
+                    logger.warning("Chromium chưa được cài — thử cài tự động...")
+                    if self._ensure_chromium():
+                        logger.info("Cài Chromium xong — thử lại tải file...")
+                        continue
+                    else:
+                        import sys
+                        if getattr(sys, "frozen", False):
+                            driver_path = Path(sys._MEIPASS) / "playwright" / "driver" / "playwright.cmd"
+                            manual_cmd = f'  "{driver_path}" install chromium'
+                        else:
+                            manual_cmd = "  playwright install chromium"
+                        raise RuntimeError(
+                            "Không thể cài Playwright Chromium tự động.\n"
+                            "Vui lòng mở Command Prompt (cmd) và chạy lệnh sau,\n"
+                            "rồi khởi động lại ứng dụng:\n"
+                            f"{manual_cmd}"
+                        ) from exc
+                logger.warning("  Browser download lần %d thất bại: %s", attempt, exc)
+                if attempt < self._retry_count:
+                    result.notes.clear()
+
+        if last_exc:
+            logger.error("Browser download thất bại sau %d lần cho %s: %s", self._retry_count, portal_url, last_exc)
+            result.notes.append(f"Lỗi tải file từ portal: {last_exc}")
 
         if not result.success and not result.notes:
-            result.notes.append("Không tải được file nào từ portal")
+            result.notes.append(f"Không tải được file nào từ portal sau {self._retry_count} lần thử")
 
         return result
 
@@ -216,6 +264,10 @@ class BrowserDownloader:
                     browser.close()
                     return []
 
+                # Extra wait for JS to finish rendering dynamic content after networkidle
+                if self._pre_click_wait > 0:
+                    page.wait_for_timeout(self._pre_click_wait)
+
                 # ── Enter access code if provided ──────────────────────────────
                 if access_code:
                     self._enter_access_code(page, access_code, result)
@@ -276,30 +328,7 @@ class BrowserDownloader:
 
             return saved
 
-        # ── First attempt ──────────────────────────────────────────────────────
-        try:
-            return _launch_and_download()
-        except Exception as exc:
-            # Detect missing Chromium executable and auto-install, then retry once
-            if "Executable doesn't exist" in str(exc) or "executable doesn't exist" in str(exc):
-                logger.warning("Chromium chưa được cài — thử cài tự động...")
-                if self._ensure_chromium():
-                    logger.info("Cài Chromium xong — thử lại tải file...")
-                    return _launch_and_download()
-                else:
-                    import sys
-                    if getattr(sys, "frozen", False):
-                        driver_path = Path(sys._MEIPASS) / "playwright" / "driver" / "playwright.cmd"
-                        manual_cmd = f'  "{driver_path}" install chromium'
-                    else:
-                        manual_cmd = "  playwright install chromium"
-                    raise RuntimeError(
-                        "Không thể cài Playwright Chromium tự động.\n"
-                        "Vui lòng mở Command Prompt (cmd) và chạy lệnh sau,\n"
-                        "rồi khởi động lại ứng dụng:\n"
-                        f"{manual_cmd}"
-                    ) from exc
-            raise
+        return _launch_and_download()
 
     def _enter_access_code(self, page, access_code: str, result: PortalDownloadResult) -> bool:
         """

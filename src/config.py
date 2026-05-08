@@ -64,10 +64,12 @@ class PortalConfig:
         "a:has-text('Tải xuống tất cả')",
         "[class*='download-all']",
     ])
-    page_load_timeout_ms: int = 30000
-    wait_after_click_ms: int = 8000
+    page_load_timeout_ms: int = 60000
+    wait_after_click_ms: int = 15000
+    pre_click_wait_ms: int = 3000         # extra wait after networkidle before clicking
+    portal_retry_count: int = 3           # number of download attempts per portal URL
+    retry_delay_ms: int = 4000            # wait between retry attempts
     headless: bool = True
-    fallback_to_attachments: bool = True  # try email attachments if no portal URL found
     parallel_downloads: int = 5           # number of portal downloads to run concurrently
 
 
@@ -174,10 +176,12 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
             "a:has-text('Tải xuống tất cả')",
             "[class*='download-all']",
         ]),
-        page_load_timeout_ms=int(portal_raw.get("page_load_timeout_ms", 30000)),
-        wait_after_click_ms=int(portal_raw.get("wait_after_click_ms", 8000)),
+        page_load_timeout_ms=int(portal_raw.get("page_load_timeout_ms", 60000)),
+        wait_after_click_ms=int(portal_raw.get("wait_after_click_ms", 15000)),
+        pre_click_wait_ms=int(portal_raw.get("pre_click_wait_ms", 3000)),
+        portal_retry_count=int(portal_raw.get("portal_retry_count", 3)),
+        retry_delay_ms=int(portal_raw.get("retry_delay_ms", 4000)),
         headless=bool(portal_raw.get("headless", True)),
-        fallback_to_attachments=bool(portal_raw.get("fallback_to_attachments", True)),
         parallel_downloads=int(portal_raw.get("parallel_downloads", 5)),
     )
 

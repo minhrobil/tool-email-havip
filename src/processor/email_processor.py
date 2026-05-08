@@ -273,6 +273,9 @@ class EmailProcessor:
             button_selectors=self._cfg.portal.download_button_selectors,
             page_load_timeout_ms=self._cfg.portal.page_load_timeout_ms,
             wait_after_click_ms=self._cfg.portal.wait_after_click_ms,
+            pre_click_wait_ms=self._cfg.portal.pre_click_wait_ms,
+            retry_count=self._cfg.portal.portal_retry_count,
+            retry_delay_ms=self._cfg.portal.retry_delay_ms,
             headless=self._cfg.portal.headless,
         )
 
@@ -381,7 +384,7 @@ class EmailProcessor:
 
         # ── PARALLEL PHASE: portal download + PDF parse (no lock) ──────────
         att_filenames, downloaded_paths, notes, status, portal_url = self._acquire_files(
-            msg, att_downloader, browser_dl, daily_folder, cfg, log
+            msg, browser_dl, daily_folder, cfg, log
         )
         file_had_error = status == _STATUS_REVIEW
 
@@ -436,6 +439,12 @@ class EmailProcessor:
                 existing_rec = dedup._records.get(msg.id)
                 redownload_seq = existing_rec.excel_seq if existing_rec else None
 
+                # Rename re-downloaded files with the original seq prefix
+                if downloaded_paths and redownload_seq is not None:
+                    downloaded_paths, att_filenames = _rename_downloaded_files(
+                        downloaded_paths, redownload_seq
+                    )
+
                 dedup.register(
                     message_id=msg.id,
                     date_folder=folder_name,
@@ -475,7 +484,6 @@ class EmailProcessor:
                 result.downloaded_file_count += len(att_filenames)
                 return
 
-            # Use pre-assigned seq (chronological) or fall back to next available
             # Use pre-assigned seq (chronological) or fall back to next available
             seq = pre_seq if pre_seq is not None else ExcelWriter(daily_folder, cfg.output.excel_filename).next_sequence_number()
             if downloaded_paths:
@@ -646,7 +654,6 @@ class EmailProcessor:
     def _acquire_files(
         self,
         msg: MailMessage,
-        att_downloader: AttachmentDownloader,
         browser_dl: BrowserDownloader,
         daily_folder: Path,
         cfg: AppConfig,
@@ -657,8 +664,8 @@ class EmailProcessor:
 
         Priority:
           1. Extract portal URL from email body → browser download via Playwright
-          2. If no portal URL found AND fallback enabled → direct email attachments
-          3. Neither available → empty list, mark as Cần kiểm tra
+          2. No portal URL found → mark as Cần kiểm tra (no fallback)
+          3. Portal download failed after all retries → mark as Cần kiểm tra
 
         Returns:
             (att_filenames, downloaded_paths, notes, status, portal_url)
@@ -696,39 +703,16 @@ class EmailProcessor:
                         status = _STATUS_REVIEW
                 return att_filenames, downloaded_paths, notes, status, portal_url
 
-            # Portal download failed
-            notes.append(f"Tải từ portal thất bại: {portal_url}")
-            log(f"  ↳ ⚠ Tải portal thất bại — thử fallback...")
+            # Portal download failed after all retries
+            log(f"  ↳ ⚠ Tải portal thất bại sau {cfg.portal.portal_retry_count} lần thử")
+            status = _STATUS_REVIEW
+            return [], [], notes, status, portal_url
 
         else:
             notes.append("Không tìm thấy link portal trong email body")
             log("  ↳ Không có link portal trong email")
 
-        # ── Strategy 2: Direct email attachments (fallback) ────────────────
-        if not cfg.portal.fallback_to_attachments:
-            status = _STATUS_REVIEW
-            return [], [], notes, status, portal_url
-
-        if msg.has_attachments:
-            attachments = att_downloader.list_attachments(msg.id)
-            downloaded_paths = att_downloader.download_all(msg.id, daily_folder, attachments)
-            att_count = len(attachments)
-            att_filenames = [p.name for p in downloaded_paths]
-
-            if att_count == 0:
-                notes.append("Email không có attachment (fallback)")
-                status = _STATUS_REVIEW
-            elif att_count > 1:
-                notes.append(f"{att_count} attachments (fallback) — cần xác nhận file chính")
-                if cfg.processing.strict_single_attachment:
-                    status = _STATUS_REVIEW
-            else:
-                notes.append("Dùng attachment trực tiếp (không có link portal)")
-
-            return att_filenames, downloaded_paths, notes, status, portal_url
-
-        # ── No files available ─────────────────────────────────────────────
-        notes.append("Không tải được file (không có portal link và không có attachment)")
+        # ── No portal URL or portal failed ─────────────────────────────────
         status = _STATUS_REVIEW
         return [], [], notes, status, portal_url
 
