@@ -33,6 +33,7 @@ from typing import Optional
 from ..auth.graph_auth import AuthRequiredError, GraphAuth
 from ..config import AppConfig, load_config
 from ..processor.email_processor import EmailProcessor, ProcessResult
+from ..version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,11 @@ class CongVanApp(tk.Tk):
             relief=tk.FLAT, padx=10, pady=4, cursor="hand2", bd=0,
         )
         self._logout_btn.pack(side=tk.RIGHT, padx=12)
+
+        tk.Label(
+            header, text=f"v{__version__}",
+            font=(_FONT, 8), bg=_NAVY, fg="#6B8CAE",
+        ).pack(side=tk.RIGHT, padx=(0, 8))
 
         self._user_label = tk.Label(
             header, text="",
