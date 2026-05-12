@@ -176,18 +176,22 @@ _RE_SO_GCN = re.compile(
 # First matching rule wins — ORDER MATTERS.
 
 CLASSIFICATION_RULES: List[tuple] = [
+    # ── TBND/QĐTC (partial grant + partial refusal — Điều 243.2 type) ─────────
+    # Mapping rule 6: cả hai phrases cùng xuất hiện trong document.
+    # 2-phrase rule tự thắng TBCB 1-phrase nhờ specificity sorting trong classify_document().
+    ("TBND/QĐTC", ["Đối tượng trong đơn nêu trên đáp ứng các điều kiện bảo hộ đối với",
+                   "để được cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
+
     # ── TBCB: thông báo cấp bằng / văn bằng ──────────────────────────────────
-    # Source: Mapping.docx phrases 1-4. Check first — these docs also contain
-    # "đáp ứng các điều kiện bảo hộ" (TBND phrase 6), so must take priority.
+    # Source: Mapping phrases 1-4.
     ("TBCB", ["để được cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
     ("TBCB", ["để được cấp Bằng độc quyền kiểu dáng công nghiệp"]),
     ("TBCB", ["để được cấp và duy trì hiệu lực năm thứ nhất của Bằng độc quyền sáng chế"]),
     ("TBCB", ["để được cấp và duy trì hiệu lực năm thứ nhất của Bằng độc quyền giải pháp hữu ích"]),
 
     # ── TBND/QĐTC: thông báo nêu dự định từ chối / quyết định từ chối ────────
-    # Source: Mapping.docx phrases 5-12
+    # Source: Mapping phrases 5-12
     ("TBND/QĐTC", ["Đối tượng trong đơn nêu trên sẽ bị từ chối cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
-    ("TBND/QĐTC", ["Đối tượng trong đơn nêu trên đáp ứng các điều kiện bảo hộ đối với"]),
     ("TBND/QĐTC", ["Đối tượng nêu trong đơn không đáp ứng tiêu chuẩn bảo hộ"]),
     ("TBND/QĐTC", ["Về việc từ chối cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
     ("TBND/QĐTC", ["Về việc từ chối cấp Bằng độc quyền kiểu dáng công nghiệp"]),
@@ -359,11 +363,17 @@ def classify_document(text: str) -> Optional[str]:
     """
     Return the label of the first matching CLASSIFICATION_RULE, or None.
     All phrases in a rule must be present for a match.
-    Matching is case-insensitive and ignores commas/semicolons (PDF extraction
+
+    Rules with more phrases are tried first (more specific beats less specific),
+    so multi-phrase rules always win over single-phrase rules regardless of their
+    position in CLASSIFICATION_RULES.  Ties in phrase count preserve list order.
+
+    Matching is case-insensitive and ignores punctuation (PDF extraction
     sometimes inserts or omits punctuation without changing the meaning).
     """
     text_norm = _norm_for_match(text)
-    for label, phrases in CLASSIFICATION_RULES:
+    sorted_rules = sorted(CLASSIFICATION_RULES, key=lambda r: len(r[1]), reverse=True)
+    for label, phrases in sorted_rules:
         if all(_norm_for_match(p) in text_norm for p in phrases):
             return label
     return None
