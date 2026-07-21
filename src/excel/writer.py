@@ -108,6 +108,18 @@ class ExcelWriter:
     def __init__(self, daily_folder: Path, excel_filename: str = "SO CONG VAN DEN-LIENDO.xlsx"):
         self.excel_path = daily_folder / excel_filename
 
+    def reset(self) -> None:
+        """Remove the previous workbook so the current scan rebuilds it from scratch."""
+        lock_file = self.excel_path.parent / f"~${self.excel_path.name}"
+        if lock_file.exists():
+            raise ExcelLockedError(self.excel_path)
+        if not self.excel_path.exists():
+            return
+        try:
+            self.excel_path.unlink()
+        except PermissionError as exc:
+            raise ExcelLockedError(self.excel_path) from exc
+
     def append_data_row(self, row_data: Dict[str, Any],
                         highlight_red: bool = False,
                         highlight_yellow: bool = False) -> None:

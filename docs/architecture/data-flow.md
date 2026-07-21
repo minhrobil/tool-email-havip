@@ -46,11 +46,10 @@ get_daily_folder(received_datetime, root_folder, format, fallback)
 Path(daily_folder), bool(used_fallback)
         │
         ▼
-DedupManager(daily_folder)
-        │  Loads ~/.tool_mail_cong_van/<date>/_processed.json
-        │  Pre-check: message_id + internet_message_id only
-        │  → if duplicate → skip email before file I/O
-        │
+Fresh daily output preparation
+        │  Delete the affected day's previous Excel workbook
+        │  Clear the affected day's dedup registry
+        │  Assign deterministic indexes 1..N in mailbox order
         ▼
 _acquire_files()
         │
@@ -66,7 +65,7 @@ _acquire_files()
         │       │       └── if no link exists, extractor can still construct
         │       │          https://thongbao.ipvietnam.gov.vn/tra-cuu-don/{code}
         │       │
-        │       └── BrowserDownloader.download(portal_url, daily_folder, access_code)
+        │       └── BrowserDownloader.download(..., filename_index)
         │               ├── sync_playwright() → chromium.launch(headless=cfg.portal.headless)
         │               ├── page.goto(..., timeout=30000, wait_until="networkidle")
         │               ├── optionally fill access-code input + submit
@@ -91,19 +90,11 @@ ParsedDocument
         │  .loai_cong_van, .loai_hinh_don, .noi_dung_cong_van, .nhan_hieu
         │
         ▼
-DedupManager.is_duplicate()   (full check under _write_lock)
-        │  additional business keys: date_folder+so_don, date_folder+filename
-        │  → if duplicate → skip
-        │
-        ▼
-ExcelWriter.next_sequence_number()
-        │  scans DATA sheet rows where column A is numeric
-        │  returns next 1-based sequence for that day
-        │
-_rename_downloaded_files(paths, seq)
-        │  renames each file to `{seq}-{original_name}`
-        │  example: `3-thongbao.pdf`
-        │
+DedupManager.is_duplicate()   (after download, under _write_lock)
+        │  repeated message_id in the same query → do not append twice
+        │  different email with same portal URL/filename → retain both files and
+        │  append an Excel row whose Lỗi says "Trùng file với dòng X"
+        │  new document → append a normal Excel row
         ▼
 _write_results(...)
         │  if seq == 1 → append_date_row("DD/MM/YYYY") first
@@ -200,22 +191,6 @@ All configured output paths use `Path(...).expanduser()` before use.
 
 ---
 
-## Optional Local Web Flow (Present in Source)
-
-`src/web/server.py:create_app()` defines an alternate execution path:
-
-```
-POST /api/scan
-    └── background thread
-            └── EmailProcessor.run(...)
-                    └── pushes progress into asyncio.Queue
-                            └── GET /api/scan/stream (SSE)
-```
-
-`run_web.py` is still a placeholder, so this flow exists in code but is not currently wired to a repo launcher script.
-
----
-
 ## File Output Locations
 
 | File | Path | Created by |
@@ -225,5 +200,5 @@ POST /api/scan
 | Downloaded files | `<daily_folder>\{seq}-{original_name}` | `src/processor/email_processor.py:_rename_downloaded_files()` |
 | Dedup registry | `~/.tool_mail_cong_van/<date>/_processed.json` | `src/dedup/manager.py` |
 | GUI scan log | `~/.tool_mail_cong_van/<from_date>/scan_<range>.log` | `src/gui/app.py:_add_scan_log_handler()` |
-| Scheduler wrapper log | repo root or dist root: `_scheduler_run.log` | `run_headless.sh`, `run_headless.bat`, `packaging/windows/run_headless.dist.bat` |
+| Scheduler wrapper log | repo root or dist root: `_scheduler_run.log` | `run_headless.bat`, `packaging/windows/run_headless.dist.bat` |
 | Token cache | `~/.tool_mail_cong_van/token_cache.bin` | `src/auth/graph_auth.py` |

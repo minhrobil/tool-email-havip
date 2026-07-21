@@ -1159,17 +1159,6 @@ class CongVanApp(tk.Tk):
         self._dash_processing[1].set("0")
         self._dash_done[1].set(str(result.downloaded_file_count))
 
-        # Update baseline so subsequent scans also accumulate correctly
-        self._base_stats = {
-            "success":      b.get("success", 0) + result.success_count,
-            "file_err":     f_err,
-            "scan":         scan,
-            "missing_data": b.get("missing_data", 0) + result.missing_data_count,
-            "dup":          0,  # reset each scan; next scan will count fresh duplicates
-            "error":        b.get("error", 0) + result.error_count,
-            "total":        base_total + total - result.duplicate_count,
-        }
-
         # Show "open folder" button whenever scan finishes
         if total >= 0:
             self._open_export_btn.pack(side=tk.LEFT, padx=(12, 0))

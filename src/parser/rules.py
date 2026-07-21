@@ -177,10 +177,10 @@ _RE_SO_GCN = re.compile(
 
 CLASSIFICATION_RULES: List[tuple] = [
     # ── TBND/QĐTC (partial grant + partial refusal — Điều 243.2 type) ─────────
-    # Mapping rule 6: cả hai phrases cùng xuất hiện trong document.
-    # 2-phrase rule tự thắng TBCB 1-phrase nhờ specificity sorting trong classify_document().
+    # Chỉ coi là từ chối một phần khi văn bản có cả phần đáp ứng bảo hộ và
+    # dấu hiệu từ chối. Cụm "để được cấp..." riêng không phải dấu hiệu từ chối.
     ("TBND/QĐTC", ["Đối tượng trong đơn nêu trên đáp ứng các điều kiện bảo hộ đối với",
-                   "để được cấp Giấy chứng nhận đăng ký nhãn hiệu"]),
+                   "bị từ chối"]),
 
     # ── TBCB: thông báo cấp bằng / văn bằng ──────────────────────────────────
     # Source: Mapping phrases 1-4.
@@ -449,11 +449,10 @@ def _extract_text_ocr(pdf_path: Path) -> str:
     get_textpage_ocr() returns text in PDF coordinates which are rotated for scanned
     documents (rotation=270 is common for Vietnamese IP office docs).
 
-    Requirements (system-level, not Python packages):
-      - macOS:   brew install tesseract tesseract-lang
-      - Windows: winget install UB-Mannheim.TesseractOCR
-                 then download vie.traineddata to Tesseract's tessdata folder
-                 https://github.com/tesseract-ocr/tessdata_best
+    Windows requirement (system-level, not a Python package):
+      winget install UB-Mannheim.TesseractOCR
+      Then download vie.traineddata to Tesseract's tessdata folder:
+      https://github.com/tesseract-ocr/tessdata_best
     """
     import os
     import subprocess

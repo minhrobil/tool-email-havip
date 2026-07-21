@@ -5,10 +5,9 @@ Storage: each daily folder contains _processed.json that records every
 email processed in that folder.  The manager is scoped to ONE daily folder.
 
 Layered dedup check (priority order):
-  1. Portal URL       — primary business key; same URL = same document, skip download
-  2. internetMessageId — fallback for emails without portal URL (RFC 2822)
-  3. Graph message id  — fallback when internetMessageId unavailable
-  4. Downloaded filename — post-download safety net for parallel threads
+  1. Graph message id   — guard against a repeated message within the current run
+  2. Portal URL         — primary cross-email business key after download
+  3. Downloaded filename — post-download safety net; numeric index is ignored
 
 is_duplicate() is called BEFORE writing to Excel.
 register()     is called AFTER a successful write.
@@ -17,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,20 +28,23 @@ from typing import Dict, List, Optional, Set, Tuple
 class DupCheckResult:
     """Result of a dedup check.
 
-    is_dup=True, needs_redownload=False  → skip entirely (already processed)
-    is_dup=True, needs_redownload=True   → re-download files, skip Excel write
+    matched_message_id identifies reruns; matched_excel_seq identifies the row
+    that a different duplicate email must reference in Excel and logs.
     is_dup=False                         → process as a new email
     """
     is_dup: bool
     reason: str = ""
     needs_redownload: bool = False
     download_url: Optional[str] = None
+    matched_message_id: Optional[str] = None
+    matched_excel_seq: Optional[int] = None
 
 from ..folder.routing import get_tool_export_folder
 
 logger = logging.getLogger(__name__)
 
 _PROCESSED_FILE = "_processed.json"
+_INDEX_PREFIX = re.compile(r"^\d+-(.+)$")
 
 
 @dataclass
@@ -103,29 +106,29 @@ class DedupManager:
         Check whether this email was already processed in this daily folder.
 
         Returns DupCheckResult:
-          is_dup=True,  needs_redownload=False  → skip (already processed, files OK)
-          is_dup=True,  needs_redownload=True   → re-download files, skip Excel write
+          is_dup=True   → inspect matched_message_id/matched_excel_seq
           is_dup=False                          → new email, full processing
         """
         matched_rec: Optional[DedupRecord] = None
         reason = ""
 
-        # 1. Portal URL — primary business key (same link = same document)
-        if portal_url and portal_url in self._url_keys:
-            matched_rec = self._records.get(self._id_by_url.get(portal_url, ""))
-            reason = f"portal URL: {portal_url}"
-
-        # 2. Graph message id — technical fallback
-        if matched_rec is None and message_id in self._tech_keys:
+        # 1. Graph message id — a rerun always maps back to its own Excel row.
+        if message_id in self._tech_keys:
             matched_rec = self._records.get(message_id)
             reason = f"message_id: {message_id[:20]}…"
+
+        # 2. Portal URL — cross-email business key (same link = same document)
+        if matched_rec is None and portal_url and portal_url in self._url_keys:
+            matched_rec = self._records.get(self._id_by_url.get(portal_url, ""))
+            reason = f"portal URL: {portal_url}"
 
         # 4. Downloaded filename — post-download safety net
         if matched_rec is None:
             for fn in (attachment_filenames or []):
-                if fn in self._business_keys:
-                    matched_rec = self._records.get(self._id_by_bkey.get(fn, ""))
-                    reason = f"filename: {fn}"
+                business_name = _canonical_filename(fn)
+                if business_name in self._business_keys:
+                    matched_rec = self._records.get(self._id_by_bkey.get(business_name, ""))
+                    reason = f"filename: {business_name}"
                     break
 
         if matched_rec is None:
@@ -153,9 +156,16 @@ class DedupManager:
                     reason=reason,
                     needs_redownload=True,
                     download_url=matched_rec.download_url,
+                    matched_message_id=matched_rec.message_id,
+                    matched_excel_seq=matched_rec.excel_seq,
                 )
 
-        return DupCheckResult(is_dup=True, reason=reason)
+        return DupCheckResult(
+            is_dup=True,
+            reason=reason,
+            matched_message_id=matched_rec.message_id,
+            matched_excel_seq=matched_rec.excel_seq,
+        )
 
     def register(
         self,
@@ -208,6 +218,18 @@ class DedupManager:
 
     def count(self) -> int:
         return len(self._records)
+
+    def clear(self) -> None:
+        """Clear the selected day's registry before rebuilding a fresh workbook."""
+        self._records.clear()
+        self._tech_keys.clear()
+        self._business_keys.clear()
+        self._url_keys.clear()
+        self._id_by_tech_key.clear()
+        self._id_by_bkey.clear()
+        self._id_by_url.clear()
+        if self._file.exists():
+            self._file.unlink()
 
     def rebuild_excel(self, writer: "ExcelWriter") -> None:
         """Delete and rebuild the entire Excel from stored record snapshots.
@@ -313,11 +335,12 @@ class DedupManager:
         self._tech_keys.add(rec.message_id)
         self._id_by_tech_key[rec.message_id] = rec.message_id
         for fn in rec.attachment_filenames:
-            self._business_keys.add(fn)
-            self._id_by_bkey[fn] = rec.message_id
+            business_name = _canonical_filename(fn)
+            self._business_keys.add(business_name)
+            self._id_by_bkey.setdefault(business_name, rec.message_id)
         if rec.download_url:
             self._url_keys.add(rec.download_url)
-            self._id_by_url[rec.download_url] = rec.message_id
+            self._id_by_url.setdefault(rec.download_url, rec.message_id)
 
     def _save(self) -> None:
         # self._file already points to ~/.tool_mail_cong_van/<date>/_processed.json
@@ -335,4 +358,10 @@ class DedupManager:
 def _bkey(date_folder: str, value: str) -> str:
     """Build a business dedup key string."""
     return f"{date_folder}|{value}"
+
+
+def _canonical_filename(filename: str) -> str:
+    """Remove the per-email numeric prefix used only for file retention."""
+    match = _INDEX_PREFIX.match(filename)
+    return match.group(1) if match else filename
 

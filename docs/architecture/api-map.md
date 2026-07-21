@@ -1,7 +1,6 @@
-# API Map — Microsoft Graph + Local Web Endpoints
+# API Map — Microsoft Graph
 
-> This repo is primarily a **consumer** of Microsoft Graph API.
-> It also contains a local FastAPI server in `src/web/server.py`, but `run_web.py` is still a placeholder.
+> This repo is a **consumer** of Microsoft Graph API.
 > Updated: 2026-05-05
 
 ---
@@ -12,13 +11,11 @@
 |---|---|---|
 | OAuth token | MSAL `acquire_token_silent` | Uses cached accounts, refreshes if expired |
 | Interactive login (GUI/headless bootstrap) | MSAL `acquire_token_interactive` | Opens browser, `prompt="select_account"` |
-| Web callback login | MSAL `initiate_auth_code_flow` + `acquire_token_by_auth_code_flow` | Used only by `src/web/server.py` |
 | Token cache | MSAL `SerializableTokenCache` | Persisted at `~/.tool_mail_cong_van/token_cache.bin` |
 
 **Required Azure App settings:**
 - Type: Public client (Mobile/Desktop)
 - Redirect URI for GUI/native flow: `http://localhost`
-- Redirect URI for local web flow (if enabled): `http://localhost:8080/api/auth/callback` by default
 - Permissions: `Mail.Read`, `Mail.ReadBasic` (Delegated)
 
 ---
@@ -129,27 +126,3 @@ The portal is **not** a REST API. It is automated through Playwright in `src/por
 - `_hrefs_from_html()` HTML-unescapes `href="..."` values
 - `_bare_urls()` scans text/HTML, strips trailing punctuation, and applies `html.unescape()`
 - If no URL is found, `extract_portal_access_code()` may still produce a constructed fallback URL: `https://thongbao.ipvietnam.gov.vn/tra-cuu-don/{access_code}`
-
----
-
-## Local Web API (Source Present, Launcher Pending)
-
-`src/web/server.py:create_app()` defines a single-user FastAPI app. `run_web.py` is still a placeholder, so these routes exist in source but are not currently wired to a runnable entry script.
-
-| Method | Path | Handler | Purpose |
-|---|---|---|---|
-| GET | `/` | `index()` | Serve `static/index.html` |
-| GET | `/api/auth/status` | `auth_status()` | Return `{authenticated, username}` |
-| GET | `/api/auth/url` | `auth_url()` | Initiate MSAL auth-code flow |
-| GET | `/api/auth/callback` | `auth_callback()` | Exchange code for token, redirect to `/` |
-| POST | `/api/auth/logout` | `auth_logout()` | Clear token cache |
-| POST | `/api/scan` | `start_scan()` | Start background email scan |
-| GET | `/api/scan/stream` | `scan_stream()` | SSE progress stream |
-| GET | `/api/scan/result` | `scan_result()` | Return final scan summary |
-| GET | `/api/scan/download` | `download_zip()` | Zip and stream the last output folder |
-
-**Notes:**
-- Default redirect URI is derived from `port` passed to `create_app()` (`http://localhost:{port}/api/auth/callback`)
-- The server stores runtime state in the module-level `_st` singleton
-- Scan execution still delegates to `EmailProcessor.run()` on a background thread
-- `index()` expects `src/web/static/index.html`, but that static file is not present in the current repo snapshot

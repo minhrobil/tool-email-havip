@@ -1,11 +1,6 @@
 @echo off
 :: ─────────────────────────────────────────────────────────────────────────
-:: setup.bat  —  Legacy Windows source setup for Cong Van Processor
-::
-:: Source development is macOS-first now. Prefer:
-::   setup.sh
-::
-:: This file is kept only for emergency source runs on Windows.
+:: setup.bat  —  Windows source setup for Cong Van Processor
 :: ─────────────────────────────────────────────────────────────────────────
 chcp 65001 > nul
 cd /d "%~dp0"
@@ -13,10 +8,8 @@ cd /d "%~dp0"
 set "PYTHON=py -3"
 
 echo ================================================================
-echo  Cong Van Processor - Legacy Windows Source Setup
+echo  Cong Van Processor - Windows Source Setup
 echo ================================================================
-echo.
-echo NOTE: Source development is macOS-first. Use setup.sh on macOS.
 echo.
 
 :: ── Step 1: Verify Python ─────────────────────────────────────────────────
@@ -109,7 +102,7 @@ echo NEXT STEPS:
 echo   1. Edit config.json  -^>  set azure.client_id
 echo      (See README.md -^> Azure App Registration for instructions)
 echo.
-echo   2. Double-click run.bat to launch the application, or use ./run.sh on macOS
+echo   2. Double-click run.bat to launch the application
 echo.
 echo   3. Click "Dang nhap Microsoft" to sign in once
 echo.

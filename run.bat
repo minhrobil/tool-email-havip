@@ -11,8 +11,7 @@ set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
 
 if not exist "%PYTHON_EXE%" (
     echo [ERROR] Khong tim thay Windows virtual environment tai venv\.
-    echo Source development is now macOS-first. Use ./setup.sh and ./run.sh on macOS.
-    echo Neu bat buoc chay source tren Windows, chay setup.bat truoc.
+    echo Chay setup.bat truoc.
     echo.
     pause
     exit /b 1

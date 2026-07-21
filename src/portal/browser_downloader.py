@@ -84,7 +84,13 @@ class BrowserDownloader:
 
     # ── Public ─────────────────────────────────────────────────────────────
 
-    def download(self, portal_url: str, target_folder: Path, access_code: str = "") -> PortalDownloadResult:
+    def download(
+        self,
+        portal_url: str,
+        target_folder: Path,
+        access_code: str = "",
+        filename_index: Optional[int] = None,
+    ) -> PortalDownloadResult:
         """
         Navigate to portal_url, optionally enter an access code, click the download button,
         and save all files.
@@ -94,6 +100,7 @@ class BrowserDownloader:
             target_folder: Daily folder where downloaded files will be saved.
             access_code:   Optional access code ("mã tra cứu") to enter on the portal page
                            before looking for the download button.
+            filename_index: Optional per-email index prepended to every saved filename.
 
         Returns:
             PortalDownloadResult with paths of successfully saved files.
@@ -122,7 +129,13 @@ class BrowserDownloader:
                 import time as _time
                 _time.sleep(self._retry_delay / 1000)
             try:
-                saved = self._run(portal_url, target_folder, result, access_code)
+                saved = self._run(
+                    portal_url,
+                    target_folder,
+                    result,
+                    access_code,
+                    filename_index,
+                )
                 if saved:
                     result.downloaded_paths = saved
                     result.success = True
@@ -230,6 +243,7 @@ class BrowserDownloader:
         target_folder: Path,
         result: PortalDownloadResult,
         access_code: str = "",
+        filename_index: Optional[int] = None,
     ) -> List[Path]:
         from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
@@ -305,14 +319,16 @@ class BrowserDownloader:
                 # ── Save downloads (must happen BEFORE browser.close()) ────────
                 for dl in downloads_received:
                     filename = _sanitize(dl.suggested_filename or "download")
+                    if filename_index is not None:
+                        filename = _indexed_filename(filename, filename_index)
                     dest = target_folder / filename
-                    # Remove stale file so the new download overwrites it cleanly
+                    # The index is stable for an email, so reruns replace that
+                    # email's own file instead of creating additional copies.
                     if dest.exists():
                         try:
                             dest.unlink()
-                            logger.debug("Removed stale file before overwrite: %s", dest.name)
                         except OSError as exc:
-                            logger.warning("Cannot remove stale file %s: %s", dest.name, exc)
+                            logger.warning("Cannot replace existing file %s: %s", dest.name, exc)
                     try:
                         dl.save_as(str(dest))   # blocks until download completes
                         saved.append(dest)
@@ -469,6 +485,11 @@ def _sanitize(name: str) -> str:
     name = _WIN_ILLEGAL.sub("_", name)
     name = name.strip(". ")
     return name or "download"
+
+
+def _indexed_filename(filename: str, index: int) -> str:
+    """Prefix a downloaded filename with its stable per-email index."""
+    return f"{index}-{filename}"
 
 
 def _unique_path(folder: Path, filename: str) -> Path:

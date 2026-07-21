@@ -25,8 +25,8 @@
 
 ### RISK-004: `CLASSIFICATION_RULES` Ordering
 - **Location:** `src/parser/rules.py:CLASSIFICATION_RULES`
-- **Risk:** Rule order is first-match-wins. In particular, `"Từ chối hủy bỏ HLC"` must stay before `"Cấp toàn bộ"`.
-- **Mitigation:** Preserve ordering comments and run parser tests after any change.
+- **Risk:** Rule order is first-match-wins after ưu tiên rule nhiều phrase. Nội dung “đáp ứng điều kiện bảo hộ” có thể xuất hiện cả trong văn bản cấp bằng và từ chối một phần.
+- **Mitigation:** Chỉ phân loại từ chối một phần khi có thêm dấu hiệu “bị từ chối”; giữ test phân biệt TBCB/TBND và chạy toàn bộ parser tests sau mọi thay đổi.
 
 ---
 
@@ -40,7 +40,7 @@
 ### RISK-006: Playwright Chromium Not Installed
 - **Location:** `src/portal/browser_downloader.py:download()`
 - **Risk:** Portal downloads cannot run without Chromium. Source runs and packaged EXEs both depend on a Playwright browser install on the target machine.
-- **Mitigation:** `setup.sh`, `build.bat`, and `.github/workflows/build.yml` install Chromium; README documents target-machine setup.
+- **Mitigation:** `setup.bat`, `build.bat`, and `.github/workflows/build.yml` install Chromium; README documents target-machine setup.
 
 ### RISK-007: Multi-PDF Selection Heuristic
 - **Location:** `src/processor/email_processor.py:_find_main_pdf()`
@@ -84,7 +84,7 @@
 ### RISK-014: Auto-Scan Behavior Depends on App Uptime
 - **Location:** `src/gui/app.py:_scheduler_loop()`
 - **Risk:** Auto-scan only runs while the GUI app is open. Launching the app exactly on a scheduled boundary is intentionally skipped once to avoid surprise immediate scans.
-- **Mitigation:** Use OS-level schedulers (`setup_scheduler.sh`, `setup_scheduler.bat`) for unattended runs.
+- **Mitigation:** Use Windows Task Scheduler via `setup_scheduler.bat` for unattended runs.
 
 ### RISK-015: Excel File Corruption Stops the Day’s Writes
 - **Location:** `src/excel/writer.py:_load_or_create()`

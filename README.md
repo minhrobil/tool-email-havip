@@ -1,355 +1,116 @@
-# 📬 Công Văn Processor
+# Công Văn Processor
 
-> Local Windows tool that automatically reads emails from Outlook Web / Microsoft 365,
-> extracts portal links from the email body, uses browser automation to download documents,
-> parses document fields, and writes daily reports to Excel.
+Ứng dụng Windows đọc email từ Microsoft 365, tải công văn từ portal IP Vietnam hoặc attachment, phân tích PDF và ghi báo cáo Excel theo ngày.
 
----
+## Yêu cầu
 
-## 🤖 AI Agents — Start Here
+- Windows 10/11
+- Python 3.10+ từ python.org, có Python Launcher (`py`) và Tkinter
+- Azure App Registration có delegated permissions `Mail.Read` và `Mail.ReadBasic`
 
-If you are an AI coding agent (GitHub Copilot, Claude, Cursor, ChatGPT, etc.) working on this repository:
+Tesseract OCR chỉ cần khi xử lý PDF scan. `setup.bat` sẽ thử cài bằng `winget` nếu máy chưa có.
 
-1. **Read [`AGENTS.md`](./AGENTS.md) first** — architecture overview, pipeline, critical rules, pre-submit checklist.
-2. **Use [`CLAUDE.md`](./CLAUDE.md)** — fast lookup: key files, access patterns, important commands.
-3. **Check [`docs/architecture/pattern-cookbook.md`](./docs/architecture/pattern-cookbook.md)** — copy-paste templates for every common task.
-4. **Check [`docs/tickets/`](./docs/tickets/)** — previous fixes in related areas before starting.
-5. **Create a ticket file** from [`docs/tickets/_TEMPLATE.md`](./docs/tickets/_TEMPLATE.md) before writing any code.
+## Chạy từ source trên Windows
 
-| File | Purpose |
+Mở PowerShell tại thư mục project:
+
+```powershell
+cd "C:\Users\minh.nguyenq3\Documents\QuangMinh\Work\Code\HomeX\Repositories\tool-email-havip"
+./setup.bat
+```
+
+`setup.bat` tạo `venv`, cài dependency, cài Playwright Chromium và chạy test. Sau đó kiểm tra `azure.client_id`, `mail.target_folder_name` và `output.root_folder` trong `config.json`.
+
+Chạy GUI:
+
+```powershell
+./run.bat
+```
+
+Hoặc chạy trực tiếp để debug:
+
+```powershell
+./venv/Scripts/python.exe ./run_app.py
+```
+
+Lần đầu, bấm **Đăng nhập Microsoft** để tạo token cache, rồi bấm **Quét mail**.
+
+Mỗi lần quét thành công sẽ xóa workbook của ngày liên quan và tạo lại Excel từ toàn bộ email tìm thấy; ứng dụng không append vào workbook của lần chạy trước.
+
+## Chạy headless
+
+Phải đăng nhập thành công bằng GUI ít nhất một lần trước khi chạy:
+
+```powershell
+./run_headless.bat
+```
+
+Chạy theo khoảng thời gian:
+
+```powershell
+./venv/Scripts/python.exe ./run_app.py --headless `
+  --from-datetime "20/07/2026 00:00" `
+  --to-datetime "20/07/2026 23:59"
+```
+
+Cài lịch chạy hằng ngày lúc 08:00 (mở PowerShell bằng quyền Administrator):
+
+```powershell
+./setup_scheduler.bat
+```
+
+Log của scheduler nằm tại `_scheduler_run.log` ở thư mục ứng dụng.
+
+## Test và build
+
+```powershell
+# Test
+./venv/Scripts/python.exe -m pytest tests -v
+
+# Build bản Windows
+./build.bat
+```
+
+Bản build nằm tại `dist\ToolXuLyMailCongVan\`. Khi deploy, copy toàn bộ thư mục này; không chỉ copy file `.exe`.
+
+## Cấu hình chính
+
+| Section | Ý nghĩa |
 |---|---|
-| [`AGENTS.md`](./AGENTS.md) | Full operating manual — READ THIS FIRST |
-| [`CLAUDE.md`](./CLAUDE.md) | Quick reference — key files, access patterns |
-| [`.github/copilot-instructions.md`](./.github/copilot-instructions.md) | Code style, naming, mandatory workflow rules |
-| [`docs/architecture/feature-map.md`](./docs/architecture/feature-map.md) | Where every feature lives in the code |
-| [`docs/architecture/data-flow.md`](./docs/architecture/data-flow.md) | Exact email → Excel pipeline |
-| [`docs/architecture/pattern-cookbook.md`](./docs/architecture/pattern-cookbook.md) | 12 copy-paste patterns |
-| [`docs/architecture/known-risks.md`](./docs/architecture/known-risks.md) | 15 ranked fragile areas |
-| [`docs/architecture/api-map.md`](./docs/architecture/api-map.md) | Microsoft Graph endpoints used |
-| [`docs/tickets/_TEMPLATE.md`](./docs/tickets/_TEMPLATE.md) | Template for new ticket docs |
+| `azure` | Azure client ID, tenant và Microsoft Graph scopes |
+| `mail` | Tên thư mục Outlook và page size |
+| `output` | Thư mục output, tên Excel và fallback folder |
+| `processing` | Log level và quy tắc attachment |
+| `portal` | URL portal, selector tải file, timeout, headless và số luồng tải |
 
----
+Token được lưu tại `%USERPROFILE%\.tool_mail_cong_van\token_cache.bin`. Xóa file này nếu cần đăng nhập lại từ đầu.
 
-## How It Works
+## Lỗi thường gặp
 
-Each email in the "Công văn" folder contains a **link to the IP Vietnam document portal**
-(not a direct file attachment). The tool:
-
-1. Reads the email body to extract the portal lookup URL
-2. Opens the portal page automatically in a headless Chromium browser (Playwright)
-3. Clicks the **"Tải tất cả"** button to download all document files
-4. Saves the downloaded files to the correct daily folder
-5. Parses the PDF to extract document fields (Số công văn, Số đơn, Deadline…)
-6. Appends a row to the Excel file in that daily folder
-
-**Fallback**: If no portal URL is found in the email body, the tool falls back to
-checking for direct email attachments (configurable via `portal.fallback_to_attachments`).
-
----
-
-## Quick Start (macOS Dev)
-
-Use the macOS shell scripts while developing locally:
-
-```bash
-./setup.sh
-./run.sh
-./run_headless.sh
-./setup_scheduler.sh        # optional launchd job at 08:00
-```
-
-- `setup.sh`: tạo `.venv`, cài dependencies, cài Playwright Chromium, chạy test
-- `run.sh`: mở GUI từ source trên macOS
-- `run_headless.sh`: chạy headless từ source trên macOS
-- `setup_scheduler.sh`: tạo `launchd` job trong `~/Library/LaunchAgents/`
-- `build.sh`: chỉ nhắc rằng build `.exe` phải thực hiện trên Windows
-
-## Quick Start (End Users on Windows)
-
-Use the packaged Windows build from `dist\ToolXuLyMailCongVan\`.
-
-1. Edit `dist\ToolXuLyMailCongVan\config.json` → set your `azure.client_id` and output folder
-2. Ensure Playwright Chromium is available on the target machine (see deployment notes below)
-3. Double-click **`ToolXuLyMailCongVan.exe`** to open the application
-4. Click **"🔑 Đăng nhập Microsoft"** → sign in once in the browser
-5. Click **"📥 Quét mail"** to process emails
-6. Optional: right-click `dist\ToolXuLyMailCongVan\setup_scheduler.bat` → **Run as administrator**
-
-After the first sign-in, you never need to sign in again (token cached automatically).
-
----
-
-## Azure App Registration (one-time setup)
-
-You need to register a free Azure AD application to allow the tool to read your mailbox.
-
-1. Go to https://portal.azure.com → search "App registrations" → **New registration**
-2. Name: `ToolXuLyMailCongVan` (any name)
-3. Supported account types: **Accounts in any organizational directory and personal Microsoft accounts**
-4. Redirect URI: select **"Mobile and desktop applications"** → enter `http://localhost`
-5. Click **Register**
-6. Copy the **Application (client) ID** → paste into `config.json` → `azure.client_id`
-7. Go to **API permissions** → **Add a permission** → Microsoft Graph → Delegated permissions
-   - Add: `Mail.Read`
-   - Add: `Mail.ReadBasic`
-8. Click **Grant admin consent** (or ask your IT admin)
-
----
-
-## Configuration (`config.json`)
-
-```json
-{
-  "azure": {
-    "client_id": "YOUR_CLIENT_ID_HERE",
-    "tenant_id": "common",
-    "scopes": ["https://graph.microsoft.com/Mail.Read"]
-  },
-  "mail": {
-    "target_folder_name": "Công văn",
-    "page_size": 50
-  },
-  "output": {
-    "root_folder": "~/Desktop/CongVanExport",
-    "excel_filename": "SO CONG VAN DEN-LIENDO.xlsx",
-    "date_folder_format": "%y.%m.%d"
-  },
-  "processing": {
-    "strict_single_attachment": false,
-    "log_level": "INFO"
-  },
-  "portal": {
-    "url_patterns": ["ipvietnam.gov.vn", "dichvucong.ipvietnam"],
-    "download_button_selectors": [
-      "button:has-text('Tải tất cả')",
-      "a:has-text('Tải tất cả')",
-      "button:has-text('Tải xuống tất cả')"
-    ],
-    "page_load_timeout_ms": 15000,
-    "wait_after_click_ms": 8000,
-    "headless": true,
-    "fallback_to_attachments": true
-  }
-}
-```
-
-### Portal config explained
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `url_patterns` | `["ipvietnam.gov.vn"]` | Substrings that identify a portal URL in the email body |
-| `download_button_selectors` | (see above) | CSS/text selectors tried in order to find the download button |
-| `page_load_timeout_ms` | `15000` | Max ms to wait for page to load |
-| `wait_after_click_ms` | `8000` | Time to wait after clicking for downloads to start |
-| `headless` | `true` | `false` = show browser window (useful for debugging) |
-| `fallback_to_attachments` | `true` | If no portal URL found, try direct email attachments |
-
----
-
-## Output Structure
-
-```
-~/Desktop/CongVanExport/
-└── 26.04.14\                          ← one folder per email received date
-    ├── SO CONG VAN DEN-LIENDO.xlsx   ← Excel with DATA and META sheets
-    ├── thong_bao_12345.pdf            ← downloaded from portal
-    ├── _processed.json                ← deduplication registry
-    └── _run.log                       ← processing log
-```
-
-### Excel Columns (DATA sheet)
-
-| Column | Description |
-|--------|-------------|
-| Ngày nhận mail | Email received date |
-| Thư mục ngày | Daily folder name |
-| Tên mail (Subject) | Email subject |
-| Người gửi | Sender name and email |
-| Tên attachment | Downloaded file name(s) |
-| Số công văn | e.g. `53397/SHTT-NH.IP` |
-| Loại công văn | Classified type (Dự định từ chối, Cấp toàn bộ, …) |
-| Ngày issue công văn | Document date |
-| Số tháng deadline | e.g. `2` or `3` |
-| Deadline trả lời Cục | Calculated reply deadline |
-| Số đơn | e.g. `4-2025-20619` |
-| Loại hình đơn | Nhãn hiệu / Sáng chế / … |
-| Nội dung công văn | First substantive paragraph |
-| Trạng thái xử lý | OK / Cần kiểm tra |
-| Ghi chú lỗi | Parsing warnings |
-| Message ID | Email identifier for traceability |
-
----
-
-## Building a Standalone .exe
-
-```bat
-build.bat
-```
-
-Output:
-
-- `dist\ToolXuLyMailCongVan\ToolXuLyMailCongVan.exe`
-- `dist\ToolXuLyMailCongVan\run_headless.bat`
-- `dist\ToolXuLyMailCongVan\setup_scheduler.bat`
-
-**Note**: Playwright's Chromium browser must be separately installed on the target machine:
-```bat
-playwright install chromium
-```
-Or copy `%LOCALAPPDATA%\ms-playwright\` from the build machine.
-
----
-
-## Deploying the .exe to Another Machine
-
-Sau khi build, copy toàn bộ thư mục `dist\ToolXuLyMailCongVan\` sang máy đích.
-
-| Việc | Dùng Python (source) | Dùng `.exe` (deploy) |
-|---|---|---|
-| Chạy GUI | `run.bat` | `ToolXuLyMailCongVan.exe` |
-| Đăng nhập lần đầu | `run.bat` → click Đăng nhập | `ToolXuLyMailCongVan.exe` → click Đăng nhập |
-| Chạy headless thủ công | `run_headless.bat` | `ToolXuLyMailCongVan.exe --headless` |
-| Cài schedule tự động | `setup_scheduler.bat` | `dist\ToolXuLyMailCongVan\setup_scheduler.bat` |
-| Cần Python? | ✅ Có | ❌ Không |
-
-> Trong bản dist Windows, `setup_scheduler.bat` đã được build ra sẵn và chạy bằng
-> `run_headless.bat` nội bộ trong cùng thư mục dist.
-
----
-
-## Automatic Daily Execution (Task Scheduler)
-
-1. Đăng nhập lần đầu bằng cách chạy GUI (`run.bat` hoặc `ToolXuLyMailCongVan.exe`) → click **"Đăng nhập Microsoft"**
-2. Right-click **`setup_scheduler.bat`** trong thư mục dist → **Run as administrator**
-3. The tool will automatically run at 08:00 every day
-
-To manually trigger: right-click **`run_headless.bat`** → Run (hoặc chạy `ToolXuLyMailCongVan.exe --headless`)  
-To view logs: open `_scheduler_run.log` in the application folder
-
----
-
-## Running Tests
-
-```bat
-pip install pytest python-dateutil
-python -m pytest tests/ -v
-```
-
-Tests cover: parser rules, dedup logic, folder routing, and portal URL extraction.
-
----
-
-## File Acquisition Flow
-
-```
-Email received
-    │
-    ▼
-Extract portal URL from body_html / body_text
-    │
-    ├── URL found ──► Open in headless Chromium
-    │                     │
-    │                     ▼
-    │               Wait for page load
-    │                     │
-    │                     ▼
-    │               Click "Tải tất cả" button
-    │                     │
-    │                     ├── Success ──► Save files to daily folder
-    │                     │
-    │                     └── Failure ──► Mark "Cần kiểm tra" + notes
-    │
-    └── No URL found
-            │
-            ├── fallback_to_attachments = true
-            │       └── Check direct email attachments
-            │                │
-            │                ├── Has attachments ──► Download to daily folder
-            │                └── No attachments  ──► "Cần kiểm tra"
-            │
-            └── fallback_to_attachments = false ──► "Cần kiểm tra"
-```
-
----
-
-## Document Type Classification Rules
-
-| Loại công văn | Keyword phrases required |
+| Lỗi | Cách xử lý |
 |---|---|
-| Dự định từ chối | "dự định từ chối" |
-| Từ chối toàn bộ | "từ chối cấp" + "toàn bộ" |
-| Từ chối một phần | "từ chối cấp" |
-| Cấp toàn bộ | "đáp ứng các điều kiện bảo hộ" |
-| KQTĐ nội dung | "kết quả thẩm định nội dung" |
-| KQTĐ hình thức | "kết quả thẩm định hình thức" |
+| Không tìm thấy `venv` | Chạy `setup.bat` |
+| Thiếu Playwright Chromium | Chạy `./venv/Scripts/python.exe -m playwright install chromium` |
+| Headless báo chưa đăng nhập | Chạy `run.bat` và đăng nhập lại |
+| Không tìm thấy thư mục Công văn | Kiểm tra `mail.target_folder_name` trong `config.json` |
+| Không ghi được Excel | Đóng file Excel output đang mở |
+| Output không truy cập được | Đổi `output.root_folder`; ứng dụng sẽ dùng fallback trên Desktop |
 
-To add a new rule: edit `src/parser/rules.py` → `CLASSIFICATION_RULES` list.
+## Cấu trúc
 
----
-
-## Deduplication Logic
-
-Within each daily folder (priority order):
-
-1. `internetMessageId` (RFC 2822) — most reliable
-2. Graph `message.id`
-3. `date_folder + so_don`
-4. `date_folder + downloaded_filename`
-
----
-
-## Troubleshooting
-
-| Symptom | Solution |
-|---------|----------|
-| "Playwright chưa cài đặt" | Run: `pip install playwright && playwright install chromium` |
-| "Không tìm thấy nút 'Tải tất cả'" | Check `portal.download_button_selectors`; set `headless: false` to see what the page looks like |
-| "Trang portal trả về lỗi" | The portal link may be expired; check the email manually |
-| "Không tìm thấy link portal" | The URL patterns may not match; check `portal.url_patterns` in config.json |
-| "config.json not found" | Place `config.json` next to `run.bat` / `.exe` |
-| "azure.client_id is not set" | Set your Azure App client_id in `config.json` |
-| "Không tìm thấy thư mục Công văn" | Check folder name in Outlook Web; update `mail.target_folder_name` |
-| "Cannot save Excel — file may be open" | Close the Excel file and re-run |
-| Output folder unreachable | Select another output folder in the app or update `config.json` |
-| Token expired in headless mode | Run `run.bat` once to refresh login |
-
----
-
-## Project Structure
-
+```text
+src/
+  auth/       Microsoft login và token cache
+  graph/      Microsoft Graph client
+  mail/       Đọc email và attachment
+  portal/     Tải tài liệu bằng Playwright
+  parser/     Phân tích nội dung công văn
+  folder/     Chọn thư mục output theo ngày nhận mail
+  dedup/      Chống xử lý trùng
+  excel/      Ghi báo cáo
+  processor/  Điều phối pipeline
+  gui/        Giao diện Tkinter
+tests/        Automated tests
 ```
-mail-extract/
-├── src/
-│   ├── config.py                   Configuration loader (includes PortalConfig)
-│   ├── main.py                     Entry point (GUI + headless)
-│   ├── auth/graph_auth.py          MSAL OAuth, token cache
-│   ├── graph/client.py             Graph API HTTP client
-│   ├── mail/reader.py              Folder discovery, message retrieval (incl. body)
-│   ├── mail/downloader.py          Direct attachment download (fallback)
-│   ├── portal/url_extractor.py     Extract portal URL from email HTML/text body
-│   ├── portal/browser_downloader.py  Playwright: open portal, click "Tải tất cả"
-│   ├── parser/rules.py             Vietnamese document parser (regex)
-│   ├── excel/writer.py             Excel writer (openpyxl)
-│   ├── dedup/manager.py            Deduplication (_processed.json)
-│   ├── folder/routing.py           Daily folder routing
-│   ├── processor/email_processor.py  Main pipeline orchestrator
-│   └── gui/app.py                  tkinter GUI
-├── tests/
-│   ├── test_parser.py
-│   ├── test_dedup.py
-│   ├── test_folder_routing.py
-│   └── test_portal_extractor.py    ← NEW
-├── config.json                     ← Edit this (includes portal section)
-├── requirements.txt                ← includes playwright
-├── setup.sh                        First-time setup on macOS
-├── run.sh                          Launch GUI on macOS
-├── run_headless.sh                 Launch headless on macOS
-├── setup_scheduler.sh              Register daily launchd job on macOS
-├── build.sh                        Explain Windows-only build flow on macOS
-├── setup.bat                       Legacy Windows source setup
-├── run.bat                         Legacy Windows source GUI launcher
-├── run_headless.bat                Legacy Windows source headless launcher
-├── setup_scheduler.bat             Legacy Windows source Task Scheduler setup
-├── packaging/windows/              Dist-ready Windows helper scripts
-└── build.bat                       Build .exe
-```
+
+Chi tiết dành cho người bảo trì nằm trong `AGENTS.md` và `docs/architecture/`.

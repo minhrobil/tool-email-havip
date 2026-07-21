@@ -76,6 +76,88 @@ class TestDedupManagerFreshFolder:
         assert result.is_dup is True
         assert "filename" in result.reason
 
+    def test_detects_same_filename_with_different_index_prefixes(self, tmp_path):
+        """Download indexes must not hide a duplicate business filename."""
+        mgr = make_manager(tmp_path)
+        stored = tmp_path / "1-thong_bao.pdf"
+        stored.write_bytes(b"%PDF")
+        mgr.register(
+            "msg1", "26.04.14",
+            attachment_filenames=[stored.name],
+        )
+
+        result = mgr.is_duplicate(
+            "msg2", "26.04.14",
+            attachment_filenames=["2-thong_bao.pdf"],
+        )
+
+        assert result.is_dup is True
+        assert "filename" in result.reason
+        assert result.matched_message_id == "msg1"
+        assert result.matched_excel_seq is None
+
+    def test_duplicate_reports_original_excel_sequence(self, tmp_path):
+        mgr = make_manager(tmp_path)
+        stored = tmp_path / "1-thong_bao.pdf"
+        stored.write_bytes(b"%PDF")
+        mgr.register(
+            "msg1", "26.04.14",
+            attachment_filenames=[stored.name],
+            excel_seq=1,
+        )
+
+        result = mgr.is_duplicate(
+            "msg2", "26.04.14",
+            attachment_filenames=["2-thong_bao.pdf"],
+        )
+
+        assert result.matched_excel_seq == 1
+
+    def test_rerun_matches_own_message_before_shared_portal_url(self, tmp_path):
+        mgr = make_manager(tmp_path)
+        portal_url = "https://example.test/shared"
+        for seq, message_id in enumerate(("msg1", "msg2"), start=1):
+            filename = f"{seq}-same.pdf"
+            (tmp_path / filename).write_bytes(b"%PDF")
+            mgr.register(
+                message_id,
+                "26.04.14",
+                attachment_filenames=[filename],
+                download_url=portal_url,
+                excel_seq=seq,
+            )
+
+        result = mgr.is_duplicate(
+            "msg1",
+            "26.04.14",
+            attachment_filenames=["1-same.pdf"],
+            portal_url=portal_url,
+        )
+
+        assert result.matched_message_id == "msg1"
+        assert result.matched_excel_seq == 1
+
+    def test_multiple_duplicates_keep_referring_to_first_excel_row(self, tmp_path):
+        mgr = make_manager(tmp_path)
+        for seq, message_id in enumerate(("msg1", "msg2"), start=1):
+            filename = f"{seq}-same.pdf"
+            (tmp_path / filename).write_bytes(b"%PDF")
+            mgr.register(
+                message_id,
+                "26.04.14",
+                attachment_filenames=[filename],
+                excel_seq=seq,
+            )
+
+        result = mgr.is_duplicate(
+            "msg3",
+            "26.04.14",
+            attachment_filenames=["3-same.pdf"],
+        )
+
+        assert result.matched_message_id == "msg1"
+        assert result.matched_excel_seq == 1
+
     def test_file_deleted_triggers_redownload(self, tmp_path):
         """If a previously downloaded file is deleted, needs_redownload=True is signalled."""
         mgr = make_manager(tmp_path)
@@ -145,3 +227,14 @@ class TestDedupManagerFreshFolder:
         # Should not raise; should start with empty state
         mgr = make_manager(tmp_path)
         assert mgr.count() == 0
+
+    def test_clear_removes_all_records_for_fresh_run(self, tmp_path):
+        mgr = make_manager(tmp_path)
+        mgr.register("msg1", "26.04.14", excel_seq=1)
+
+        mgr.clear()
+
+        assert mgr.count() == 0
+        assert not (tmp_path / "_processed.json").exists()
+        reloaded = make_manager(tmp_path)
+        assert reloaded.is_duplicate("msg1", "26.04.14").is_dup is False

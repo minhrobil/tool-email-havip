@@ -79,19 +79,6 @@ User clicks "Đóng Excel & Thử lại":
 - **Platform note:** Auto-close only works on Windows because it shells out to `taskkill`
 - **Risk:** Kills all Excel processes for the current session
 
-### 6. Optional Web Scan Worker (`src/web/server.py:start_scan()`)
-
-```
-POST /api/scan
-    └── threading.Thread(target=_worker, daemon=True).start()
-            └── EmailProcessor.run(...)
-                └── asyncio.run_coroutine_threadsafe(queue.put(...), loop)
-```
-
-- **Daemon:** Yes
-- **Only active if** `create_app()` is used by a future launcher
-- **Communication back to client:** `asyncio.Queue` + SSE stream (`/api/scan/stream`)
-
 ---
 
 ## Event Listeners
@@ -159,14 +146,8 @@ self.after(0, lambda: self._append_log(message))
 
 ### Open Export Folder
 - **Location:** `src/gui/app.py:_open_folder_in_file_manager()`
-- **Commands:** macOS `open`, Windows `explorer`, Linux `xdg-open`
+- **Command on supported platform:** Windows `explorer`
 - **Style:** Non-blocking via `subprocess.Popen(...)`
-
-### macOS LaunchAgent Setup
-- **Location:** `setup_scheduler.sh`
-- **Commands:** `launchctl bootout`, `launchctl bootstrap`
-- **When:** Developer installs a daily `launchd` job for `run_headless.sh`
-- **Outputs:** `_scheduler_run.log`, `_scheduler_run.err.log`
 
 ### Windows Task Scheduler Setup
 - **Location:** `setup_scheduler.bat`, `packaging/windows/setup_scheduler.dist.bat`
@@ -177,6 +158,6 @@ self.after(0, lambda: self._append_log(message))
 
 ## Practical Implications
 
-- The repo has **two async execution surfaces** today: tkinter GUI scans and the unused-but-real FastAPI server.
+- The tkinter GUI starts scan work on background threads.
 - The actual heavy work is **not single-threaded**: `EmailProcessor.run()` fans out into a worker pool.
 - Only the Excel write + dedup register phase is protected by `_write_lock`; download/parsing work remains concurrent by design.

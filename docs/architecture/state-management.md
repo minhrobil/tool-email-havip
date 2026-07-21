@@ -17,7 +17,6 @@
 | GUI runtime state | `CongVanApp` instance vars + tkinter vars | In-memory | App lifetime |
 | GUI baseline stats | `CongVanApp._base_stats` | In-memory dict | App lifetime |
 | Config | `AppConfig` dataclass | In-memory | Loaded once per process |
-| Optional web server state | `src/web/server.py:_st` | Module-level singleton | Process lifetime |
 
 ---
 
@@ -112,24 +111,6 @@ class ProcessResult:
   3. current working directory
 - Output paths are normalized with `.expanduser()` before use
 - GUI mutates `self._config.mail.target_folder_name` at runtime before starting a scan
-
-### 6. Optional Web Server State (`src/web/server.py`)
-
-```python
-class _State:
-    def __init__(self) -> None:
-        self.config = None
-        self.auth = None
-        self.auth_flow = None
-        self.running = False
-        self.scan_queue = None
-        self.scan_result = None
-        self.last_output_folder = str(Path.home() / "Desktop" / "CongVanExport")
-```
-
-- `_st` is a **module-level singleton**
-- **Scope:** whole FastAPI process
-- **Concurrency implication:** the web server is designed for a single active user / single active scan
 
 ---
 

@@ -391,15 +391,3 @@ if result.success:
 else:
     print(result.notes)
 ```
-
----
-
-## Pattern 13 — Create the Local FastAPI App (Source-Only)
-
-```python
-from src.web.server import create_app
-
-app = create_app(port=8080)
-```
-
-**Current reality:** `create_app()` is implemented, but `run_web.py` is still a placeholder. If you activate this path, document the launcher and test the auth callback flow.
