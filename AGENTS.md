@@ -22,7 +22,7 @@
 ## Invariant bắt buộc
 
 1. Folder output phải dựa trên `message.received_datetime`, không dùng thời điểm chạy.
-2. Mỗi scan tạo mới Excel và dedup state của ngày liên quan; không append workbook cũ. Index được dựng lại 1..N theo vị trí email trong toàn bộ kết quả quét, không reset theo ngày và không phụ thuộc số file tải thành công.
+2. Mỗi scan tạo mới Excel và dedup state của ngày liên quan; không append workbook cũ. Mỗi ngày có index độc lập 1..N theo vị trí email trong ngày, không phụ thuộc số file tải thành công.
 3. Email khác nhưng trùng file vẫn có dòng Excel riêng, ghi rõ dòng gốc.
 4. Excel write và dedup register phải cùng nằm trong `_write_lock`; tải file nằm ngoài lock.
 5. Worker thread chỉ cập nhật Tkinter qua `self.after(...)`.

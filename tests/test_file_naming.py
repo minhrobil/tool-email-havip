@@ -48,8 +48,11 @@ class TestMakeSeqFilename:
 
         assert assigned == {"mail-1": 1, "mail-new": 2}
 
-    def test_scan_index_follows_global_email_position_across_date_folders(self):
+    def test_scan_index_restarts_for_each_date_folder(self):
         processor = EmailProcessor.__new__(EmailProcessor)
+        processor._cfg = SimpleNamespace(
+            output=SimpleNamespace(date_folder_format="%y.%m.%d")
+        )
         messages = [
             SimpleNamespace(id="mail-1", received_datetime="2026-07-16T12:00:00Z"),
             SimpleNamespace(id="mail-2", received_datetime="2026-07-17T12:00:00Z"),
@@ -58,7 +61,7 @@ class TestMakeSeqFilename:
 
         assigned = processor._pre_assign_seq(messages)
 
-        assert assigned == {"mail-1": 1, "mail-2": 2, "mail-3": 3}
+        assert assigned == {"mail-1": 1, "mail-2": 1, "mail-3": 2}
 
     def test_seq_10(self):
         assert _make_seq_filename(10, "document", ".xlsx") == "10-document.xlsx"

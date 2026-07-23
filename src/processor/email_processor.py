@@ -346,14 +346,24 @@ class EmailProcessor:
 
     def _pre_assign_seq(self, messages: List["MailMessage"]) -> Dict[str, int]:
         """
-        Pre-assign the scan position to every message BEFORE parallel downloads.
+        Pre-assign the daily position to every message BEFORE parallel downloads.
         Messages must already be sorted oldest-first.
 
-        The index is global for the current mailbox query, not per output folder or
-        per successfully downloaded file. Therefore a scan containing N emails
-        always assigns 1..N, including emails whose download later fails.
+        Each date folder has an independent 1..N sequence. The index follows the
+        email position within that day, not the number of successfully downloaded
+        files, so failed and duplicate downloads still consume their email index.
         """
-        return _assign_fresh_sequences([msg.id for msg in messages])
+        date_format = self._cfg.output.date_folder_format
+        next_index_by_folder: Dict[str, int] = {}
+        assigned: Dict[str, int] = {}
+
+        for msg in messages:
+            folder_name = get_date_folder_name(msg.received_datetime, date_format)
+            index = next_index_by_folder.get(folder_name, 0) + 1
+            next_index_by_folder[folder_name] = index
+            assigned[msg.id] = index
+
+        return assigned
 
     # ── Per-message pipeline ───────────────────────────────────────────────
 
