@@ -384,7 +384,7 @@ class CongVanApp(tk.Tk):
 
         # Row 1 — sender email
         _lbl("Email người gửi:", 1)
-        self._sender_email_var = tk.StringVar(value="cucsohuutritue@ipvietnam.gov.vn")
+        self._sender_email_var = tk.StringVar(value="cucsohuutritue1@ipvietnam.gov.vn")
         self._sender_email_entry = ttk.Entry(
             g, textvariable=self._sender_email_var, font=(_FONT, 9), width=34,
         )

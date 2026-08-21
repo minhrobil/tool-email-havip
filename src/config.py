@@ -31,7 +31,7 @@ class AzureConfig:
 class MailConfig:
     target_folder_name: str = "Công văn"
     page_size: int = 50
-    sender_email: str = "cucsohuutritue@ipvietnam.gov.vn"
+    sender_email: str = "cucsohuutritue1@ipvietnam.gov.vn"
 
 
 @dataclass
@@ -137,7 +137,7 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
     mail = MailConfig(
         target_folder_name=mail_raw.get("target_folder_name", "Công văn"),
         page_size=int(mail_raw.get("page_size", 50)),
-        sender_email=mail_raw.get("sender_email", "cucsohuutritue@ipvietnam.gov.vn"),
+        sender_email=mail_raw.get("sender_email", "cucsohuutritue1@ipvietnam.gov.vn"),
     )
 
     out_raw = raw.get("output", {})
