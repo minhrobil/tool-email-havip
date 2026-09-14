@@ -469,13 +469,21 @@ def _extract_text_ocr(pdf_path: Path) -> str:
                     # Tesseract reads in the correct visual order.  get_textpage_ocr()
                     # would OCR an upright image but then map text back to the rotated
                     # PDF coordinate system, causing the header area to be missed.
-                    pix = page.get_pixmap(dpi=300)  # applies page.rotation automatically
+                    # dpi=400 (up from 300) gives Tesseract more pixels per glyph,
+                    # which reduces digit misreads (e.g. "4" vs "5") on small
+                    # reference-number text in low-quality scans.
+                    pix = page.get_pixmap(dpi=400)  # applies page.rotation automatically
                     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
                         tmp_path = f.name
                     pix.save(tmp_path)
                     try:
                         proc = subprocess.run(
-                            ["tesseract", tmp_path, "stdout", "-l", "vie"],
+                            # --psm 6: treat the page as a single uniform block of
+                            # text, which is more accurate than the default
+                            # auto-segmentation (psm 3) for these single-column
+                            # official documents and further reduces character
+                            # misreads.
+                            ["tesseract", tmp_path, "stdout", "-l", "vie", "--psm", "6"],
                             capture_output=True, text=True, encoding="utf-8", timeout=60,
                         )
                         texts.append(proc.stdout)
@@ -483,7 +491,7 @@ def _extract_text_ocr(pdf_path: Path) -> str:
                         os.unlink(tmp_path)
                 else:
                     # Non-rotated pages: built-in OCR is fine.
-                    tp = page.get_textpage_ocr(language="vie", dpi=300, full=True)
+                    tp = page.get_textpage_ocr(language="vie", dpi=400, full=True)
                     texts.append(page.get_text(textpage=tp))
             except Exception as page_exc:
                 logger.debug("OCR page %d of %s failed: %s", page.number, pdf_path.name, page_exc)
