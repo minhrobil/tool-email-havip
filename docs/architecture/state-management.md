@@ -160,7 +160,12 @@ background scan worker
 | GUI scan log | ✅ Yes | During each scan | Plain text |
 | Excel workbook | ✅ Yes | After each append | `.xlsx` |
 | Scheduler wrapper log | ✅ Yes | During headless wrapper execution | Plain text |
-| GUI preferences (date range, output folder) | ❌ No | — | In-memory only |
-| Config | ✅ Manual | `config.json` on disk | JSON |
+| GUI output folder | ✅ Yes | On each non-empty edit or folder selection | `config.json` → `output.root_folder` |
+| GUI date range | ❌ No | — | In-memory only |
+| Config | ✅ Yes | Manual edits; GUI automatically saves output folder | JSON |
+
+The GUI restores `output.root_folder` on startup. Automatic saves update only that
+field in the loaded config file, using an atomic replacement. Clearing the entry
+while typing preserves the last saved path. Save failures appear in Activities.
 
 **Key distinction:** business output and dedup state are intentionally split. The export folder can be remote or user-selected; the tool-state folder under `~/.tool_mail_cong_van/` is always local.

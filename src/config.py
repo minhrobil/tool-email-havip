@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -80,6 +81,7 @@ class AppConfig:
     output: OutputConfig
     processing: ProcessingConfig
     portal: PortalConfig = field(default_factory=PortalConfig)
+    config_path: Optional[Path] = field(default=None, repr=False, compare=False)
 
 
 def load_config(config_path: Optional[Path] = None) -> AppConfig:
@@ -185,4 +187,38 @@ def load_config(config_path: Optional[Path] = None) -> AppConfig:
         parallel_downloads=int(portal_raw.get("parallel_downloads", 5)),
     )
 
-    return AppConfig(azure=azure, mail=mail, output=output, processing=processing, portal=portal)
+    return AppConfig(
+        azure=azure, mail=mail, output=output, processing=processing, portal=portal,
+        config_path=config_path.resolve(),
+    )
+
+
+def save_output_folder(config: AppConfig, folder: str) -> None:
+    """Lưu thư mục export vào đúng config đã tải, giữ nguyên các mục khác."""
+    folder = folder.strip()
+    if not folder:
+        return  # Không ghi đè đường dẫn đã lưu khi người dùng đang xóa để nhập lại.
+    if config.config_path is None:
+        raise ValueError("Chưa xác định được đường dẫn config.json.")
+
+    config_path = config.config_path
+    with config_path.open(encoding="utf-8") as f:
+        raw = json.load(f)
+    raw.setdefault("output", {})["root_folder"] = folder
+
+    # Ghi file tạm cùng thư mục rồi thay thế để không làm hỏng config khi ghi lỗi.
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=config_path.parent,
+            prefix=".config-", suffix=".tmp", delete=False,
+        ) as f:
+            temp_path = Path(f.name)
+            json.dump(raw, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(temp_path, config_path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+    config.output.root_folder = str(Path(folder).expanduser())

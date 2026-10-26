@@ -31,7 +31,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Optional
 
 from ..auth.graph_auth import AuthRequiredError, GraphAuth
-from ..config import AppConfig, load_config
+from ..config import AppConfig, load_config, save_output_folder
 from ..processor.email_processor import EmailProcessor, ProcessResult
 from ..version import __version__
 
@@ -397,6 +397,7 @@ class CongVanApp(tk.Tk):
         export_row.columnconfigure(0, weight=1)
 
         self._export_folder_var = tk.StringVar(value=_DEFAULT_EXPORT)
+        self._export_folder_var.trace_add("write", self._on_export_folder_changed)
         ttk.Entry(
             export_row, textvariable=self._export_folder_var, font=(_FONT, 9),
         ).grid(row=0, column=0, sticky="ew", padx=(0, 6))
@@ -644,6 +645,8 @@ class CongVanApp(tk.Tk):
             )
             # Sync mail folder field with loaded config
             self._sender_email_var.set(self._config.mail.sender_email)
+            self._export_folder_var.set(self._config.output.root_folder)
+            self._last_export_folder = self._config.output.root_folder
         except (FileNotFoundError, ValueError) as exc:
             self._show_login()
             self._login_status.config(
@@ -747,6 +750,19 @@ class CongVanApp(tk.Tk):
             )
             return None, None
         return d_from, d_to
+
+    def _on_export_folder_changed(self, *_args: str) -> None:
+        """Tự lưu cả khi nhập trực tiếp lẫn chọn thư mục qua hộp thoại."""
+        if self._config is None:
+            return
+        folder = self._export_folder_var.get().strip()
+        if not folder or folder == self._config.output.root_folder:
+            return
+        try:
+            save_output_folder(self._config, folder)
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("Không lưu được thư mục export: %s", exc)
+            self._append_log("⚠ Không lưu được thư mục export. Kiểm tra quyền ghi config.json.")
 
     def _do_choose_folder(self) -> None:
         folder = filedialog.askdirectory(
