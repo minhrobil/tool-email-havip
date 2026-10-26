@@ -235,6 +235,7 @@ class EmailProcessor:
                     with self._write_lock:
                         result.errors.append(err)
                         result.error_count += 1
+                    log(err)
 
         # Write Excel rows in sorted (seq) order — guarantees 1→N in the output file
         pending_writes.sort(key=lambda pw: (str(pw.daily_folder), pw.seq))

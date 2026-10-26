@@ -44,6 +44,11 @@ def main() -> None:
         description="Xử lý Mail công văn — Đọc và xử lý email công văn từ Outlook 365"
     )
     parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Kiểm tra đọc PDF và xuất Excel bằng dữ liệu mẫu, không truy cập email",
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         help="Chạy không có giao diện đồ họa (dành cho Task Scheduler)",
@@ -98,6 +103,16 @@ def main() -> None:
         handlers=handlers,
         force=True,
     )
+
+    if args.self_test:
+        try:
+            from .self_test import verify_pdf_excel
+            verify_pdf_excel()
+        except Exception:
+            logging.exception("Kiểm tra PDF/Excel thất bại")
+            sys.exit(1)
+        logging.info("SELF_TEST_OK")
+        return
 
     if args.headless:
         # ── Resolve date range (default: today 00:00 → 23:59) ─────────────

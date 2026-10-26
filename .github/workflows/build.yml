@@ -55,8 +55,25 @@ jobs:
             --hidden-import playwright `
             --hidden-import playwright.sync_api `
             --collect-all msal `
+            --collect-all pymupdf `
             --collect-all playwright `
             run_app.py
+
+      - name: Verify packaged PDF parsing and Excel export
+        shell: python
+        run: |
+          import pathlib, subprocess, tempfile
+          exe = pathlib.Path("dist/ToolXuLyMailCongVan/ToolXuLyMailCongVan.exe").resolve()
+          with tempfile.TemporaryDirectory() as work:
+              report = pathlib.Path(work) / "self-test.log"
+              result = subprocess.run(
+                  [str(exe), "--self-test", "--log-file", str(report)],
+                  cwd=work, timeout=120,
+              )
+              output = report.read_text(encoding="utf-8") if report.exists() else "No self-test log"
+              print(output)
+              if result.returncode != 0 or "SELF_TEST_OK" not in output:
+                  raise SystemExit("Packaged PDF/Excel self-test failed")
 
       - name: Copy helper files into dist
         run: |
