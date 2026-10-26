@@ -233,11 +233,6 @@ class CongVanApp(tk.Tk):
         header = tk.Frame(f, bg=_NAVY, pady=12)
         header.pack(fill=tk.X)
 
-        tk.Label(
-            header, text=f"📬  {_APP_TITLE}",
-            font=(_FONT, 13, "bold"), bg=_NAVY, fg=_WHITE,
-        ).pack(side=tk.LEFT, padx=18)
-
         self._logout_btn = tk.Button(
             header, text="Đăng xuất",
             command=self._do_logout,
@@ -247,16 +242,32 @@ class CongVanApp(tk.Tk):
         )
         self._logout_btn.pack(side=tk.RIGHT, padx=12)
 
+        self._support_btn = tk.Button(
+            header, text="Hỗ trợ",
+            command=self._show_support,
+            font=(_FONT, 8), bg=_NAVY_LIGHT, fg=_WHITE,
+            activebackground=_BLUE, activeforeground=_WHITE,
+            relief=tk.FLAT, padx=10, pady=4, cursor="hand2", bd=0,
+        )
+        self._support_btn.pack(side=tk.RIGHT, padx=(0, 4))
+
         tk.Label(
             header, text=f"v{__version__}",
             font=(_FONT, 8), bg=_NAVY, fg="#6B8CAE",
         ).pack(side=tk.RIGHT, padx=(0, 8))
 
+        identity = tk.Frame(header, bg=_NAVY)
+        identity.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=18)
+        tk.Label(
+            identity, text=f"📬  {_APP_TITLE}",
+            font=(_FONT, 13, "bold"), bg=_NAVY, fg=_WHITE, anchor="w",
+        ).pack(fill=tk.X)
+
         self._user_label = tk.Label(
-            header, text="",
-            font=(_FONT, 9), bg=_NAVY, fg="#AAC4E0",
+            identity, text="",
+            font=(_FONT, 9), bg=_NAVY, fg="#AAC4E0", anchor="w",
         )
-        self._user_label.pack(side=tk.RIGHT, padx=4)
+        self._user_label.pack(fill=tk.X, pady=(4, 0))
 
         # ── Notebook (2 tabs) ──────────────────────────────────────────────
         style = ttk.Style()
@@ -775,6 +786,52 @@ class CongVanApp(tk.Tk):
     # ═══════════════════════════════════════════════════════════════════════
     # BUTTON HANDLERS
     # ═══════════════════════════════════════════════════════════════════════
+
+    def _show_support(self) -> None:
+        """Hiển thị thông tin liên hệ hỗ trợ, căn trái và tách dòng rõ ràng."""
+        dlg = tk.Toplevel(self)
+        dlg.title("Hỗ trợ")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.configure(bg=_CARD_BG)
+
+        body = tk.Frame(dlg, bg=_CARD_BG, padx=24, pady=20)
+        body.pack(fill=tk.BOTH, expand=True)
+        tk.Label(
+            body, text="Liên hệ hỗ trợ",
+            font=(_FONT, 13, "bold"), bg=_CARD_BG, fg=_NAVY,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(0, 12))
+        tk.Label(
+            body,
+            text="Nếu cần sửa lỗi hoặc thêm tính năng,\nvui lòng liên hệ hỗ trợ tới:",
+            font=(_FONT, 10), bg=_CARD_BG, fg=_TEXT,
+            justify=tk.LEFT, anchor="w",
+        ).pack(fill=tk.X, pady=(0, 16))
+        tk.Label(
+            body, text="Nguyễn Quang Minh",
+            font=(_FONT, 11, "bold"), bg=_CARD_BG, fg=_TEXT,
+            anchor="w",
+        ).pack(fill=tk.X, pady=(0, 8))
+        tk.Label(
+            body, text="Email:", font=(_FONT, 10),
+            bg=_CARD_BG, fg=_TEXT_MUTED, anchor="w",
+        ).pack(fill=tk.X)
+        email = ttk.Entry(body, font=(_FONT, 10), width=40)
+        email.insert(0, "nguyenquangminh20111997@gmail.com")
+        email.configure(state="readonly")
+        email.pack(fill=tk.X, pady=(4, 20))
+
+        close_btn = ttk.Button(body, text="Đóng", command=dlg.destroy)
+        close_btn.pack(anchor="e")
+        dlg.bind("<Escape>", lambda _event: dlg.destroy())
+        close_btn.bind("<Return>", lambda _event: dlg.destroy())
+        dlg.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dlg.winfo_width()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dlg.winfo_height()) // 2
+        dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        dlg.grab_set()
+        close_btn.focus_set()
 
     def _do_login(self) -> None:
         if not self._auth:
